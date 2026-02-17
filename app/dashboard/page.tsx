@@ -1,77 +1,177 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
-export default function DashboardPage() {
-  const [session, setSession] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+type Project = {
+  id: string;
+  name: string;
+  created_at: string;
+  owner_id: string;
+};
 
+export default function DashboardPage() {
+  const router = useRouter();
+
+  const [loading, setLoading] = useState(true);
+  const [sessionEmail, setSessionEmail] = useState<string | null>(null);
+
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [newName, setNewName] = useState("");
+  const [message, setMessage] = useState<string>("");
+
+  // 1) Load session + protect route
   useEffect(() => {
-    let mounted = true;
+    let isMounted = true;
 
     const init = async () => {
       const { data } = await supabase.auth.getSession();
-      if (mounted) {
-        setSession(data.session);
-        setLoading(false);
+      const sess = data.session;
+
+      if (!sess) {
+        router.replace("/"); // send to home/login
+        return;
       }
+
+      if (!isMounted) return;
+
+      setSessionEmail(sess.user.email ?? null);
+      setLoading(false);
+      await loadProjects();
     };
 
     init();
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      setSession(newSession);
-      setLoading(false);
-    });
-
     return () => {
-      mounted = false;
-      sub.subscription.unsubscribe();
+      isMounted = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const signOut = async () => {
-    await supabase.auth.signOut();
+  // 2) Load projects
+  const loadProjects = async () => {
+    setMessage("");
+    const { data, error } = await supabase
+      .from("projects")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+
+    setProjects((data as Project[]) ?? []);
   };
 
+  // 3) Create project
+  const createProject = async () => {
+    setMessage("");
+    const name = newName.trim();
+    if (!name) {
+      setMessage("Please enter a project name.");
+      return;
+    }
+
+    // Important: we insert owner_id (matches your DB)
+    const { data: sessData } = await supabase.auth.getSession();
+    const userId = sessData.session?.user.id;
+
+    if (!userId) {
+      setMessage("Not signed in.");
+      router.replace("/");
+      return;
+    }
+
+    const { error } = await supabase.from("projects").insert({
+      name,
+      owner_id: userId,
+    });
+
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+
+    setNewName("");
+    setMessage("Project created.");
+    await loadProjects();
+  };
+
+  // 4) Sign out
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    router.replace("/");
+  };
+
+  // UI
   if (loading) {
     return (
-      <main className="min-h-screen flex items-center justify-center p-8">
-        <p className="text-neutral-600">Loading session…</p>
+      <main className="min-h-screen flex items-center justify-center px-6">
+        <p className="text-sm text-neutral-600">Loading session…</p>
       </main>
     );
   }
 
-  // IMPORTANT: no redirect here. Just show a link back.
-  if (!session) {
-    return (
-      <main className="min-h-screen flex flex-col items-center justify-center p-8">
-        <h1 className="text-3xl font-semibold">Dashboard</h1>
-        <p className="mt-2 text-neutral-600">You’re not signed in.</p>
-        <a className="mt-6 rounded border px-4 py-2" href="/">
-          Go to sign in
-        </a>
-      </main>
-    );
-  }
-
-  // Signed in dashboard
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center p-8">
-      <h1 className="text-3xl font-semibold">Dashboard</h1>
-      <p className="mt-2 text-neutral-600">
-        Signed in as {session.user?.email}
-      </p>
+    <main className="min-h-screen px-6 py-12 flex justify-center">
+      <div className="w-full max-w-2xl space-y-8">
+        <header className="space-y-1">
+          <h1 className="text-3xl font-semibold">Dashboard</h1>
+          <p className="text-sm text-neutral-600">
+            Signed in as {sessionEmail ?? "—"}
+          </p>
+        </header>
 
-      <div className="mt-8 w-full max-w-xl rounded border p-6">
-        <p className="font-medium">Your projects</p>
-        <p className="text-sm text-neutral-600">Coming next: create + list projects</p>
+        <section className="border rounded p-6 space-y-3">
+          <h2 className="font-medium">Create a project</h2>
+
+          <input
+            className="w-full rounded border px-3 py-2"
+            placeholder="Project name"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+          />
+
+          <button
+            className="rounded bg-black px-4 py-2 text-white"
+            onClick={createProject}
+          >
+            Create
+          </button>
+        </section>
+
+        <section className="border rounded p-6 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="font-medium">Your projects</h2>
+            <button className="text-sm underline" onClick={loadProjects}>
+              Refresh
+            </button>
+          </div>
+
+          {projects.length === 0 ? (
+            <p className="text-sm text-neutral-600">No projects yet.</p>
+          ) : (
+            <ul className="space-y-2">
+              {projects.map((p) => (
+                <li key={p.id} className="rounded border px-3 py-2">
+                  <div className="font-medium">{p.name}</div>
+                  <div className="text-xs text-neutral-600">
+                    {new Date(p.created_at).toLocaleString()}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        {message ? <p className="text-sm text-neutral-700">{message}</p> : null}
+
+        <button className="text-sm underline" onClick={signOut}>
+          Sign out
+        </button>
       </div>
-
-      <button className="mt-8 rounded border px-4 py-2" onClick={signOut}>
-        Sign out
-      </button>
     </main>
   );
 }
