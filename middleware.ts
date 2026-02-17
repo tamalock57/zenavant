@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
 export async function middleware(req: NextRequest) {
-  const res = NextResponse.next();
+  let res = NextResponse.next();
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -13,25 +13,29 @@ export async function middleware(req: NextRequest) {
           return req.cookies.get(name)?.value;
         },
         set(name: string, value: string, options: any) {
+          // Important: set on BOTH request and response objects
+          req.cookies.set({ name, value, ...options });
           res.cookies.set({ name, value, ...options });
         },
         remove(name: string, options: any) {
+          req.cookies.set({ name, value: "", ...options });
           res.cookies.set({ name, value: "", ...options });
         },
       },
     }
   );
 
+  // This call refreshes session cookies when needed
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
   // Protect /dashboard
   if (!user && req.nextUrl.pathname.startsWith("/dashboard")) {
-    const redirectUrl = req.nextUrl.clone();
-    redirectUrl.pathname = "/";
-    redirectUrl.searchParams.set("redirectedFrom", req.nextUrl.pathname);
-    return NextResponse.redirect(redirectUrl);
+    const url = req.nextUrl.clone();
+    url.pathname = "/";
+    url.searchParams.set("redirectedFrom", req.nextUrl.pathname);
+    return NextResponse.redirect(url);
   }
 
   return res;
