@@ -175,7 +175,10 @@ export default function DashboardPage() {
             <div className="space-y-2">
               {projects.map((p) => (
                 <div key={p.id} className="border rounded p-3 text-sm">
-                  <div className="font-medium">{p.title}</div>
+                  <a className="font-medium underline" href={`/projects/${p.id}`}>
+              {p.title}
+            </a>
+
                   <div className="text-neutral-500 text-xs">
                     {new Date(p.created_at).toLocaleString()}
                   </div>
