@@ -6,40 +6,53 @@ import { supabase } from "@/lib/supabaseClient";
 export default function DashboardPage() {
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [projectsLoading, setProjectsLoading] = useState(false);
   const [projectTitle, setProjectTitle] = useState("");
   const [projects, setProjects] = useState<any[]>([]);
   const [message, setMessage] = useState("");
 
-  // Load session
+  // Load session on mount
   useEffect(() => {
     const getSession = async () => {
       const { data } = await supabase.auth.getSession();
       setSession(data.session);
       setLoading(false);
+      if (data.session) {
+        loadProjects();
+      }
     };
     getSession();
   }, []);
 
   // Load projects
   const loadProjects = async () => {
-    if (!session) return;
+    setProjectsLoading(true);
+    setMessage("");
+
+    const { data: userData } = await supabase.auth.getUser();
+    const user = userData?.user;
+
+    if (!user) {
+      setMessage("No active session found.");
+      setProjectsLoading(false);
+      return;
+    }
 
     const { data, error } = await supabase
       .from("projects")
       .select("id, title, created_at")
-      .eq("owner_id", session.user.id)
+      .eq("owner_id", user.id)
       .order("created_at", { ascending: false });
 
-    if (!error && data) {
-      setProjects(data);
+    if (error) {
+      setMessage(`Load error: ${error.message}`);
+      setProjectsLoading(false);
+      return;
     }
-  };
 
-  useEffect(() => {
-    if (session) {
-      loadProjects();
-    }
-  }, [session]);
+    setProjects(data ?? []);
+    setProjectsLoading(false);
+  };
 
   // Create project
   const createProject = async () => {
@@ -50,17 +63,26 @@ export default function DashboardPage() {
       return;
     }
 
+    const { data: userData } = await supabase.auth.getUser();
+    const user = userData?.user;
+
+    if (!user) {
+      setMessage("No active session.");
+      return;
+    }
+
     const { error } = await supabase.from("projects").insert({
       title: projectTitle,
-      owner_id: session.user.id,
+      owner_id: user.id,
     });
 
     if (error) {
       setMessage(error.message);
-    } else {
-      setProjectTitle("");
-      loadProjects();
+      return;
     }
+
+    setProjectTitle("");
+    loadProjects();
   };
 
   const signOut = async () => {
@@ -77,7 +99,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-start px-6 py-10 space-y-10">
+    <main className="min-h-screen flex flex-col items-center px-6 py-10 space-y-6">
       <div className="text-center">
         <h1 className="text-3xl font-semibold">Dashboard</h1>
         <p className="text-neutral-500 mt-2">
@@ -115,13 +137,16 @@ export default function DashboardPage() {
           <button
             className="text-sm underline"
             onClick={loadProjects}
+            disabled={projectsLoading}
           >
-            Refresh
+            {projectsLoading ? "Refreshing..." : "Refresh"}
           </button>
         </div>
 
         {projects.length === 0 ? (
-          <p className="text-sm text-neutral-500">No projects yet.</p>
+          <p className="text-sm text-neutral-500">
+            No projects yet.
+          </p>
         ) : (
           projects.map((p) => (
             <div
