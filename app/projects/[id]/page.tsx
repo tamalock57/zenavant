@@ -1,71 +1,46 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+// ✅ C1) Add state (put these near your other useState lines)
+const [prompt, setPrompt] = useState("");
+const [generating, setGenerating] = useState(false);
+const [result, setResult] = useState<string | null>(null);
 
-export default function ProjectPage() {
-  const params = useParams();
-  const router = useRouter();
-  const id = params?.id as string;
+// ✅ C2) Add generate function (put this under your useEffect blocks)
+const handleGenerate = async () => {
+  if (!prompt.trim()) return;
 
-  const [loading, setLoading] = useState(true);
-  const [project, setProject] = useState<any>(null);
-  const [message, setMessage] = useState("");
+  setGenerating(true);
+  setResult(null);
 
-  useEffect(() => {
-    const load = async () => {
-      setMessage("");
+  // Placeholder logic for now
+  setTimeout(() => {
+    setResult(`Generated result for: "${prompt}"`);
+    setGenerating(false);
+  }, 1000);
+};
 
-      const { data: userData } = await supabase.auth.getUser();
-      if (!userData?.user) {
-        router.replace("/");
-        return;
-      }
+// ✅ C3) Replace the “Generation will live here next” section with this
+<div className="border rounded p-6 space-y-4">
+  <h2 className="font-medium">Generate</h2>
 
-      const { data, error } = await supabase
-        .from("projects")
-        .select("id, title, created_at, owner_id")
-        .eq("id", id)
-        .single();
+  <input
+    className="w-full rounded border px-3 py-2"
+    placeholder="Describe what you want to create..."
+    value={prompt}
+    onChange={(e) => setPrompt(e.target.value)}
+  />
 
-      if (error) {
-        setMessage(error.message);
-        setLoading(false);
-        return;
-      }
+  <button
+    className="rounded bg-black text-white px-4 py-2"
+    onClick={handleGenerate}
+    disabled={generating}
+  >
+    {generating ? "Generating..." : "Generate"}
+  </button>
 
-      setProject(data);
-      setLoading(false);
-    };
-
-    if (id) load();
-  }, [id, router]);
-
-  if (loading) return <div className="p-8">Loading project…</div>;
-
-  if (message) return <div className="p-8 text-red-600">{message}</div>;
-
-  if (!project) return <div className="p-8">Project not found.</div>;
-
-  return (
-    <main className="min-h-screen px-6 py-10 flex justify-center">
-      <div className="w-full max-w-2xl space-y-6">
-        <button className="text-sm underline" onClick={() => router.back()}>
-          ← Back
-        </button>
-
-        <div className="border rounded p-6 space-y-2">
-          <h1 className="text-3xl font-semibold">{project.title}</h1>
-          <p className="text-sm text-neutral-600">
-            Created {new Date(project.created_at).toLocaleString()}
-          </p>
-        </div>
-
-        <div className="border rounded p-6 text-neutral-600">
-          Generation will live here next.
-        </div>
-      </div>
-    </main>
-  );
-}
+  {result && (
+    <div className="border rounded p-3 text-sm">
+      {result}
+    </div>
+  )}
+</div>
