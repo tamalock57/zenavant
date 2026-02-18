@@ -77,32 +77,39 @@ export default function DashboardPage() {
   };
 
   const createProject = async () => {
-    setMessage("");
+  setMessage("");
 
-    const title = projectTitle.trim();
-    if (!title) {
-      setMessage("Please enter a project title.");
-      return;
-    }
+  const title = projectTitle.trim();
+  if (!title) {
+    setMessage("Please enter a project title.");
+    return;
+  }
 
-    if (!session?.user?.id) {
-      setMessage("Not signed in.");
-      return;
-    }
+  const { data: userData, error: userErr } = await supabase.auth.getUser();
+  const user = userData?.user;
 
-    const { error } = await supabase.from("projects").insert({
-      title,
-      owner_id: session.user.id,
-    });
+  if (userErr || !user) {
+    setMessage("Not signed in.");
+    return;
+  }
 
-    if (error) {
-      setMessage(error.message);
-      return;
-    }
+  const { error } = await supabase.from("projects").insert({
+    title,
+    owner_id: user.id,
+  });
 
-    setProjectTitle("");
-    await loadProjects(); // IMPORTANT: awaits refresh after create
-  };
+  if (error) {
+    setMessage(error.message);
+    return;
+  }
+
+  // ✅ clear ONLY after success
+  setProjectTitle("");
+
+  // refresh list (optional await)
+  await loadProjects();
+};
+
 
   const signOut = async () => {
     await supabase.auth.signOut();
@@ -130,11 +137,12 @@ export default function DashboardPage() {
           <h2 className="font-medium">Create a project</h2>
 
           <input
-            className="w-full rounded border px-3 py-2"
-            placeholder="Project title"
-            value={projectTitle}
-            onChange={(e) => setProjectTitle(e.target.value)}
-          />
+           value={projectTitle}
+           onChange={(e) => setProjectTitle(e.target.value)}
+           className="w-full rounded border px-3 py-2"
+           placeholder="Project title"
+         />
+
 
           <button
             className="rounded bg-black text-white px-4 py-2"
