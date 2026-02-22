@@ -19,16 +19,14 @@ export default function ProjectPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
 
+  const [prompt, setPrompt] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+
   useEffect(() => {
     const loadProject = async () => {
       setErrorMsg("");
       setLoading(true);
-
-      if (!id) {
-        setErrorMsg("Missing project id.");
-        setLoading(false);
-        return;
-      }
 
       const { data, error } = await supabase
         .from("projects")
@@ -46,8 +44,20 @@ export default function ProjectPage() {
       setLoading(false);
     };
 
-    loadProject();
+    if (id) loadProject();
   }, [id]);
+
+  const handleGenerate = async () => {
+    if (!prompt.trim()) return;
+
+    setGenerating(true);
+    setResult(null);
+
+    setTimeout(() => {
+      setResult(`Generated result for: "${prompt}"`);
+      setGenerating(false);
+    }, 1000);
+  };
 
   return (
     <main className="min-h-screen flex flex-col items-center justify-start px-6 py-10 space-y-8">
@@ -74,8 +84,29 @@ export default function ProjectPage() {
         )}
       </div>
 
-      <div className="w-full max-w-2xl border rounded p-6 text-sm text-neutral-600">
-        Generation will live here next.
+      <div className="w-full max-w-2xl border rounded p-6 space-y-4">
+        <h2 className="font-medium">Generate</h2>
+
+        <input
+          className="w-full rounded border px-3 py-2"
+          placeholder="Describe what you want to create..."
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+        />
+
+        <button
+          className="rounded bg-black text-white px-4 py-2"
+          onClick={handleGenerate}
+          disabled={generating}
+        >
+          {generating ? "Generating..." : "Generate"}
+        </button>
+
+        {result && (
+          <div className="border rounded p-3 text-sm">
+            {result}
+          </div>
+        )}
       </div>
     </main>
   );
