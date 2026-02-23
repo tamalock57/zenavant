@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export async function POST(req: Request) {
   try {
@@ -8,54 +9,79 @@ export async function POST(req: Request) {
       return Response.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
     }
 
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      return Response.json({ error: "Missing SUPABASE_SERVICE_ROLE_KEY" }, { status: 500 });
+    }
+
     if (!thought || typeof thought !== "string") {
       return Response.json({ error: "Missing thought" }, { status: 400 });
     }
 
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-    const prompt = `
-You are Zenavant: calm, practical, and encouraging.
-Turn the user's thought into a clear plan.
-
-Return JSON only with this shape:
-{
-  "title": string,
-  "summary": string,
-  "steps": string[],
-  "firstTinyAction": string,
-  "encouragement": string
-}
-
-Rules:
-- steps: 3 to 6 items
-- short, specific steps
-- no hype, no emojis
-- keep it gentle and grounded
-
-User thought:
-${thought}
-`.trim();
-
     const response = await client.responses.create({
       model: "gpt-4o-mini",
-      input: prompt,
+      input: [
+        {
+          role: "system",
+          content:
+            "You are Zenavant: calm, warm, practical, and encouraging. Keep things grounded and specific. No hype. No emojis. Make the plan feel doable and kind.",
+        },
+        {
+          role: "user",
+          content: thought,
+        },
+      ],
+      text: {
+        format: {
+          type: "json_schema",
+          name: "turn_thought_into_plan",
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              title: { type: "string" },
+              summary: { type: "string" },
+              steps: {
+                type: "array",
+                minItems: 3,
+                maxItems: 6,
+                items: { type: "string" },
+              },
+              firstTinyAction: { type: "string" },
+              encouragement: { type: "string" },
+            },
+            required: ["title", "summary", "steps", "firstTinyAction", "encouragement"],
+          },
+        },
+      },
     });
 
-    // response.output_text should be JSON (we asked for JSON only)
-    const text = response.output_text?.trim() ?? "";
+    const jsonText = response.output_text?.trim() ?? "";
+    const data = JSON.parse(jsonText);
 
-    let data: any;
-    try {
-      data = JSON.parse(text);
-    } catch {
+    const { data: saved, error: saveError } = await supabaseAdmin
+      .from("plans")
+      .insert({
+        thought,
+        title: data.title,
+        summary: data.summary,
+        steps: data.steps,
+        first_tiny_action: data.firstTinyAction,
+        encouragement: data.encouragement,
+      })
+      .select("id")
+      .single();
+
+    if (saveError) {
+      console.error("Supabase insert error:", saveError);
       return Response.json(
-        { error: "Model did not return valid JSON", raw: text },
+        { error: "Failed to save plan", details: saveError.message },
         { status: 500 }
       );
     }
 
-    return Response.json(data);
+    return Response.json({ id: saved.id, ...data });
   } catch (error: any) {
     return Response.json(
       { error: "Turn-thought-into-plan failed", details: error?.message ?? String(error) },
