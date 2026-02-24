@@ -46,7 +46,7 @@ export async function POST(req: Request) {
                 type: "array",
                 minItems: 3,
                 maxItems: 6,
-                items: { type: "string" },
+                items: { type: "string", maxLength: 160, description: "One short plain-English step. No codes, no timestamps, no random numbers." },
               },
               firstTinyAction: { type: "string" },
               encouragement: { type: "string" },
@@ -60,13 +60,24 @@ export async function POST(req: Request) {
     const jsonText = response.output_text?.trim() ?? "";
     const data = JSON.parse(jsonText);
 
+   const rawSteps = Array.isArray(data.steps)
+  ? data.steps
+  : String(data.steps ?? "").split("\n");
+
+   const cleanSteps = rawSteps
+  .map((s: any) => String(s ?? "").trim())
+  .filter(Boolean)
+  .filter((s: string) => (s.match(/\d/g) || []).length < 20)
+  .slice(0, 6);
+    [];
+
     const { data: saved, error: saveError } = await supabaseAdmin
       .from("plans")
       .insert({
         thought,
         title: data.title,
         summary: data.summary,
-        steps: data.steps,
+        steps: cleanSteps,
         first_tiny_action: data.firstTinyAction,
         encouragement: data.encouragement,
       })
@@ -81,7 +92,14 @@ export async function POST(req: Request) {
       );
     }
 
-    return Response.json({ id: saved.id, ...data });
+    return Response.json({
+  id: saved.id,
+  title: data.title,
+  summary: data.summary,
+  steps: cleanSteps,
+  firstTinyAction: data.firstTinyAction,
+  encouragement: data.encouragement,
+});
   } catch (error: any) {
     return Response.json(
       { error: "Turn-thought-into-plan failed", details: error?.message ?? String(error) },
