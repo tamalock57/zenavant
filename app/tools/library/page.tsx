@@ -8,7 +8,6 @@ type MediaItem = {
   url?: string;
   prompt?: string;
   storage_path?: string;
-  created_at?: string;
 };
 
 type PlanItem = {
@@ -25,11 +24,12 @@ export default function LibraryPage() {
   const [plans, setPlans] = useState<PlanItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState("");
   const [error, setError] = useState("");
 
-  async function loadLibrary() {
+  async function loadLibrary(showLoading = true) {
     try {
-      setError("");
+      if (showLoading) setLoading(true);
 
       const res = await fetch("/api/library", {
         method: "GET",
@@ -47,25 +47,26 @@ export default function LibraryPage() {
 
       setMedia(Array.isArray(data.media) ? data.media : []);
       setPlans(Array.isArray(data.plans) ? data.plans : []);
+      setLastRefreshed(new Date().toLocaleTimeString());
     } catch (err: any) {
       setError(err?.message || "Library load failed.");
       setMedia([]);
       setPlans([]);
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }
 
   async function refreshLibrary() {
     try {
       setRefreshing(true);
-      await loadLibrary();
+      await loadLibrary(false);
     } finally {
       setRefreshing(false);
     }
   }
 
-  async function handleDelete(item: MediaItem) {
+  async function handleDeleteMedia(item: MediaItem) {
     const confirmDelete = confirm("Delete this item?");
     if (!confirmDelete) return;
 
@@ -80,168 +81,123 @@ export default function LibraryPage() {
       }),
     });
 
-    await loadLibrary();
+    await loadLibrary(false);
+  }
+
+  async function handleDeletePlan(plan: PlanItem) {
+    const confirmDelete = confirm("Delete this plan?");
+    if (!confirmDelete) return;
+
+    await fetch("/api/library/delete-plan", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        id: plan.id,
+      }),
+    });
+
+    await loadLibrary(false);
+  }
+
+  async function handleDownload(item: MediaItem) {
+    if (!item.url) return;
+
+    const res = await fetch(item.url);
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `zenavant-${item.id || Date.now()}`;
+    a.click();
+
+    window.URL.revokeObjectURL(url);
   }
 
   useEffect(() => {
     loadLibrary();
   }, []);
 
-  const isEmpty = media.length === 0 && plans.length === 0;
-
   return (
-    <main style={{ maxWidth: 1100, margin: "0 auto", padding: 24 }}>
+    <main style={{ maxWidth: 1000, margin: "0 auto", padding: 20 }}>
       {/* HEADER */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 20,
-        }}
-      >
-        <div>
-          <h1 style={{ fontSize: 32, margin: 0 }}>Library</h1>
-          <p style={{ opacity: 0.7 }}>
-            Your creations and saved plans
-          </p>
-        </div>
+      <div style={{ marginBottom: 20 }}>
+        <h1>Library</h1>
+        <p style={{ opacity: 0.7 }}>Your creations and saved plans</p>
 
-        <button
-          onClick={refreshLibrary}
-          disabled={refreshing}
-          style={{
-            padding: "10px 14px",
-            borderRadius: 10,
-            background: "#111",
-            color: "#fff",
-            cursor: "pointer",
-          }}
-        >
+        <button onClick={refreshLibrary} disabled={refreshing}>
           {refreshing ? "Refreshing..." : "Refresh"}
         </button>
+
+        {lastRefreshed && (
+          <p style={{ fontSize: 12, opacity: 0.5 }}>
+            Last refreshed: {lastRefreshed}
+          </p>
+        )}
       </div>
 
-      {/* STATES */}
       {loading && <p>Loading...</p>}
-
-      {!loading && error && (
-        <p style={{ color: "red" }}>{error}</p>
-      )}
-
-      {!loading && !error && isEmpty && (
-        <p>No creations yet.</p>
-      )}
+      {error && <p style={{ color: "red" }}>{error}</p>}
 
       {/* MEDIA */}
-      {!loading && media.length > 0 && (
+      {media.length > 0 && (
         <>
           <h2>Media</h2>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-              gap: 16,
-              marginBottom: 30,
-            }}
-          >
-            {media.map((item, index) => (
-              <div
-                key={item.id ?? index}
-                style={{
-                  padding: 12,
-                  border: "1px solid #ddd",
-                  borderRadius: 10,
-                }}
-              >
-                {item.type === "video" ? (
-                  <video
-                    src={item.url}
-                    controls
-                    style={{ width: "100%" }}
-                  />
-                ) : (
-                  <img
-                    src={item.url}
-                    alt=""
-                    style={{ width: "100%" }}
-                  />
-                )}
+          {media.map((item, i) => (
+            <div key={i} style={{ marginBottom: 20 }}>
+              {item.type === "video" ? (
+                <video src={item.url} controls width="100%" />
+              ) : (
+                <img src={item.url} width="100%" />
+              )}
 
-                {item.prompt && (
-                  <p style={{ fontSize: 13 }}>{item.prompt}</p>
-                )}
+              <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+                <button onClick={() => handleDownload(item)}>
+                  Download
+                </button>
 
-                {/* ✅ DELETE BUTTON */}
-                <button
-                  onClick={() => handleDelete(item)}
-                  style={{
-                    marginTop: 8,
-                    padding: "6px 10px",
-                    fontSize: 12,
-                    borderRadius: 6,
-                    border: "1px solid #ccc",
-                    background: "#ffdddd",
-                    cursor: "pointer",
-                  }}
-                >
+                <button onClick={() => handleDeleteMedia(item)}>
                   Delete
                 </button>
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
         </>
       )}
 
       {/* PLANS */}
-      {!loading && plans.length > 0 && (
+      {plans.length > 0 && (
         <>
           <h2>Plans</h2>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-              gap: 16,
-            }}
-          >
-            {plans.map((plan, index) => (
-              <div
-                key={plan.id ?? index}
-                style={{
-                  padding: 14,
-                  border: "1px solid #ddd",
-                  borderRadius: 10,
-                }}
-              >
-                <h3>{plan.title}</h3>
+          {plans.map((plan, i) => (
+            <div
+              key={i}
+              style={{
+                border: "1px solid #ccc",
+                padding: 12,
+                marginBottom: 12,
+              }}
+            >
+              <h3>{plan.title}</h3>
+              <p>{plan.summary}</p>
 
-                {plan.summary && <p>{plan.summary}</p>}
+              {plan.steps && (
+                <ul>
+                  {plan.steps.slice(0, 4).map((s, j) => (
+                    <li key={j}>{s}</li>
+                  ))}
+                </ul>
+              )}
 
-                {plan.steps && (
-                  <ol>
-                    {plan.steps.slice(0, 4).map((s, i) => (
-                      <li key={i}>{s}</li>
-                    ))}
-                  </ol>
-                )}
-
-                {plan.firstTinyAction && (
-                  <p>
-                    <strong>First step:</strong>{" "}
-                    {plan.firstTinyAction}
-                  </p>
-                )}
-
-                {plan.encouragement && (
-                  <p style={{ fontStyle: "italic" }}>
-                    {plan.encouragement}
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
+              <button onClick={() => handleDeletePlan(plan)}>
+                Delete
+              </button>
+            </div>
+          ))}
         </>
       )}
     </main>
