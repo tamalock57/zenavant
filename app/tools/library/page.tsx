@@ -101,6 +101,32 @@ export default function LibraryPage() {
     window.URL.revokeObjectURL(url);
   }
 
+  function buildPlanPrompt(plan: PlanItem) {
+    return `
+${plan.title || ""}
+${plan.summary || ""}
+${plan.steps?.join(" ") || ""}
+${plan.firstTinyAction || ""}
+${plan.encouragement || ""}
+    `.trim();
+  }
+
+  function usePlanForImage(plan: PlanItem) {
+    const prompt = buildPlanPrompt(plan);
+    if (!prompt) return;
+
+    localStorage.setItem("zenavant_prompt", prompt);
+    window.location.href = "/tools/image-maker";
+  }
+
+  function usePlanForVideo(plan: PlanItem) {
+    const prompt = buildPlanPrompt(plan);
+    if (!prompt) return;
+
+    localStorage.setItem("zenavant_prompt", prompt);
+    window.location.href = "/tools/video-maker";
+  }
+
   useEffect(() => {
     loadLibrary();
   }, []);
@@ -114,7 +140,6 @@ export default function LibraryPage() {
         fontFamily: "system-ui",
       }}
     >
-      {/* HEADER */}
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ marginBottom: 4 }}>Library</h1>
         <p style={{ opacity: 0.6 }}>Your creations and saved plans</p>
@@ -145,7 +170,6 @@ export default function LibraryPage() {
 
       {loading && <p>Loading...</p>}
 
-      {/* MEDIA */}
       {media.length > 0 && (
         <>
           <h2 style={{ marginBottom: 12 }}>Media</h2>
@@ -177,6 +201,7 @@ export default function LibraryPage() {
                 ) : (
                   <img
                     src={item.url}
+                    alt=""
                     style={{ width: "100%", borderRadius: 8 }}
                   />
                 )}
@@ -222,7 +247,6 @@ export default function LibraryPage() {
         </>
       )}
 
-      {/* PLANS */}
       {plans.length > 0 && (
         <>
           <h2 style={{ marginBottom: 12 }}>Plans</h2>
@@ -254,19 +278,65 @@ export default function LibraryPage() {
                   </ul>
                 )}
 
-                <button
-                  onClick={() => handleDeletePlan(plan)}
+                {plan.firstTinyAction && (
+                  <p style={{ fontSize: 14, opacity: 0.8 }}>
+                    <strong>First tiny action:</strong> {plan.firstTinyAction}
+                  </p>
+                )}
+
+                {plan.encouragement && (
+                  <p style={{ fontStyle: "italic", opacity: 0.7 }}>
+                    {plan.encouragement}
+                  </p>
+                )}
+
+                <div
                   style={{
+                    display: "flex",
+                    gap: 8,
                     marginTop: 10,
-                    padding: "8px 12px",
-                    borderRadius: 8,
-                    border: "1px solid #ccc",
-                    background: "#ffe3e3",
-                    cursor: "pointer",
+                    flexWrap: "wrap",
                   }}
                 >
-                  Delete
-                </button>
+                  <button
+                    onClick={() => usePlanForImage(plan)}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #ccc",
+                      background: "#eef4ff",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Use for image
+                  </button>
+
+                  <button
+                    onClick={() => usePlanForVideo(plan)}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #ccc",
+                      background: "#f3f0ff",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Use for video
+                  </button>
+
+                  <button
+                    onClick={() => handleDeletePlan(plan)}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #ccc",
+                      background: "#ffe3e3",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
             ))}
           </div>

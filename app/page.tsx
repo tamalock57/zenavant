@@ -1,148 +1,161 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { Session } from "@supabase/supabase-js";
-import { supabase } from "@/lib/supabaseClient";
+import { useRouter } from "next/navigation";
 
-export default function Home() {
-  // 1) Form state
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+export default function HomePage() {
+  const router = useRouter();
 
-  // 2) Auth session state
-  const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState<string>("");
-
-  // 3) Auth actions
-  const signUp = async () => {
-    setMessage("");
-    const { data, error } = await supabase.auth.signUp({ email, password });
-    if (error) {
-      setMessage(error.message);
-      return;
-    }
-    // Some Supabase setups require email confirmation
-    setMessage(
-      data?.user?.identities?.length
-        ? "Account created. You can sign in now."
-        : "Check your email to confirm your account, then sign in."
-    );
+  const cardStyle: React.CSSProperties = {
+    border: "1px solid rgba(0,0,0,0.08)",
+    borderRadius: 16,
+    padding: 16,
+    background: "#fff",
+    boxShadow: "0 6px 18px rgba(0,0,0,0.04)",
+    cursor: "pointer",
   };
 
-  const signIn = async () => {
-    setMessage("");
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) {
-      setMessage(error.message);
-      return;
-    }
-    setMessage("Signed in!");
+  const titleStyle: React.CSSProperties = {
+    margin: 0,
+    fontSize: 18,
+    fontWeight: 700,
   };
 
-  const signOut = async () => {
-    setMessage("");
-    const { error } = await supabase.auth.signOut();
-    if (error) setMessage(error.message);
+  const textStyle: React.CSSProperties = {
+    marginTop: 8,
+    marginBottom: 0,
+    opacity: 0.72,
+    lineHeight: 1.45,
+    fontSize: 14,
   };
-
-  // 4) Keep session in sync (runs once)
-  useEffect(() => {
-    let isMounted = true;
-
-    const boot = async () => {
-      const { data } = await supabase.auth.getSession();
-      if (!isMounted) return;
-      setSession(data.session);
-      setLoading(false);
-    };
-
-    boot();
-
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, next) => {
-      setSession(next);
-    });
-
-    return () => {
-      isMounted = false;
-      listener.subscription.unsubscribe();
-    };
-  }, []);
-
-  // 5) Optional: auto-redirect to dashboard when signed in
-  useEffect(() => {
-    if (session) {
-      window.location.href = "/dashboard";
-    }
-  }, [session]);
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center px-6">
-      <h1 className="text-4xl font-semibold">Zenavant</h1>
-
-      <p className="mt-3 text-neutral-600">Turn ideas into something new.</p>
-      <div className="mt-4 text-xs uppercase tracking-widest text-neutral-500">
-        Coming soon
-      </div>
-
-      {loading ? (
-        <div className="mt-10 text-sm text-neutral-500">Loading…</div>
-      ) : !session ? (
-        <div className="mt-8 w-full max-w-sm space-y-3">
-          <input
-            className="w-full rounded border px-3 py-2"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoComplete="email"
-          />
-
-          <input
-            className="w-full rounded border px-3 py-2"
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-          />
-
-          <div className="flex gap-2">
-            <button
-              className="flex-1 rounded bg-black px-3 py-2 text-white"
-              onClick={signUp}
-              type="button"
-            >
-              Sign up
-            </button>
-
-            <button
-              className="flex-1 rounded border px-3 py-2"
-              onClick={signIn}
-              type="button"
-            >
-              Sign in
-            </button>
-          </div>
-
-          {message ? <p className="text-sm text-neutral-600">{message}</p> : null}
-        </div>
-      ) : (
-        <div className="mt-8 flex flex-col items-center gap-4">
-          <p className="text-sm text-neutral-600">
-            Signed in as {session.user.email}
+    <main
+      style={{
+        minHeight: "100vh",
+        background: "#f7f7f8",
+        padding: 20,
+        fontFamily: "system-ui, sans-serif",
+      }}
+    >
+      <div
+        style={{
+          maxWidth: 920,
+          margin: "0 auto",
+        }}
+      >
+        <div
+          style={{
+            marginBottom: 24,
+            padding: 20,
+            borderRadius: 20,
+            background: "linear-gradient(180deg, #ffffff 0%, #f4f6fb 100%)",
+            border: "1px solid rgba(0,0,0,0.06)",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.04)",
+          }}
+        >
+          <p
+            style={{
+              margin: 0,
+              fontSize: 12,
+              letterSpacing: 1,
+              textTransform: "uppercase",
+              opacity: 0.5,
+            }}
+          >
+            Zenavant
           </p>
 
-          <a href="/dashboard" className="rounded border px-4 py-2">
-            Go to dashboard
-          </a>
+          <h1
+            style={{
+              marginTop: 8,
+              marginBottom: 10,
+              fontSize: 34,
+              lineHeight: 1.05,
+            }}
+          >
+            Turn ideas into something real.
+          </h1>
 
-          <button className="rounded border px-3 py-2" onClick={signOut} type="button">
-            Sign out
-          </button>
-
-          {message ? <p className="text-sm text-neutral-600">{message}</p> : null}
+          <p
+            style={{
+              margin: 0,
+              maxWidth: 620,
+              opacity: 0.72,
+              lineHeight: 1.5,
+              fontSize: 15,
+            }}
+          >
+            Build a plan, create images and videos, and keep everything in one
+            place.
+          </p>
         </div>
-      )}
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+            gap: 14,
+          }}
+        >
+          <div
+            style={cardStyle}
+            onClick={() => router.push("/tools/turn-thought-into-plan")}
+          >
+            <h2 style={titleStyle}>Turn Thought Into Plan</h2>
+            <p style={textStyle}>
+              Start with one thought and turn it into a calm, actionable plan.
+            </p>
+          </div>
+
+          <div
+            style={cardStyle}
+            onClick={() => router.push("/tools/image-maker")}
+          >
+            <h2 style={titleStyle}>Image Maker</h2>
+            <p style={textStyle}>
+              Create a still image from a prompt or from a saved plan.
+            </p>
+          </div>
+
+          <div
+            style={cardStyle}
+            onClick={() => router.push("/tools/video-maker")}
+          >
+            <h2 style={titleStyle}>Video Maker</h2>
+            <p style={textStyle}>
+              Generate short videos from your ideas with a cleaner workflow.
+            </p>
+          </div>
+
+          <div
+            style={cardStyle}
+            onClick={() => router.push("/tools/library")}
+          >
+            <h2 style={titleStyle}>Library</h2>
+            <p style={textStyle}>
+              View, reuse, download, and delete your saved creations and plans.
+            </p>
+          </div>
+        </div>
+
+        <div
+          style={{
+            marginTop: 18,
+            padding: 16,
+            borderRadius: 16,
+            background: "#fff",
+            border: "1px solid rgba(0,0,0,0.06)",
+          }}
+        >
+          <h3 style={{ marginTop: 0, marginBottom: 8 }}>Suggested flow</h3>
+          <p style={{ margin: 0, opacity: 0.72, lineHeight: 1.5, fontSize: 14 }}>
+            Start with <strong>Turn Thought Into Plan</strong>, then send the
+            result to <strong>Image Maker</strong> or{" "}
+            <strong>Video Maker</strong>. Check everything later in{" "}
+            <strong>Library</strong>.
+          </p>
+        </div>
+      </div>
     </main>
   );
 }
