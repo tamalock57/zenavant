@@ -6,8 +6,14 @@ import { supabase } from "@/lib/supabaseClient";
 
 export default function HomePage() {
   const router = useRouter();
+
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authMessage, setAuthMessage] = useState("");
 
   useEffect(() => {
     const init = async () => {
@@ -28,38 +34,72 @@ export default function HomePage() {
   }, []);
 
   async function handleSignIn() {
-    const email = prompt("Enter email:");
-    const password = prompt("Enter password:");
-    if (!email || !password) return;
+    if (!email.trim() || !password.trim()) {
+      setAuthMessage("Enter your email and password.");
+      return;
+    }
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      setAuthLoading(true);
+      setAuthMessage("");
 
-    if (error) alert(error.message);
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
+      if (error) {
+        setAuthMessage(error.message);
+        return;
+      }
+
+      setAuthMessage("Signed in.");
+    } finally {
+      setAuthLoading(false);
+    }
   }
 
   async function handleSignUp() {
-    const email = prompt("Enter email:");
-    const password = prompt("Enter password:");
-    if (!email || !password) return;
+    if (!email.trim() || !password.trim()) {
+      setAuthMessage("Enter your email and password.");
+      return;
+    }
 
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
+    try {
+      setAuthLoading(true);
+      setAuthMessage("");
 
-    if (error) alert(error.message);
+      const { error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+      });
+
+      if (error) {
+        setAuthMessage(error.message);
+        return;
+      }
+
+      setAuthMessage("Check your email to confirm your account.");
+    } finally {
+      setAuthLoading(false);
+    }
   }
 
   async function handleSignOut() {
     await supabase.auth.signOut();
+    setAuthMessage("");
   }
 
   if (loading) {
     return (
-      <main style={{ padding: 20, fontFamily: "system-ui, sans-serif" }}>
+      <main
+        style={{
+          minHeight: "100vh",
+          background: "#f7f7f8",
+          padding: 20,
+          fontFamily: "system-ui, sans-serif",
+        }}
+      >
         Loading...
       </main>
     );
@@ -74,8 +114,8 @@ export default function HomePage() {
     cursor: "pointer",
   };
 
-  const buttonStyle: React.CSSProperties = {
-    padding: "10px 14px",
+  const primaryButton: React.CSSProperties = {
+    padding: "12px 16px",
     borderRadius: 10,
     border: "1px solid rgba(0,0,0,0.12)",
     background: "#111",
@@ -84,14 +124,24 @@ export default function HomePage() {
     fontSize: 14,
   };
 
-  const secondaryButtonStyle: React.CSSProperties = {
-    padding: "10px 14px",
+  const secondaryButton: React.CSSProperties = {
+    padding: "12px 16px",
     borderRadius: 10,
     border: "1px solid rgba(0,0,0,0.12)",
     background: "#fff",
     color: "#111",
     cursor: "pointer",
     fontSize: 14,
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    padding: "12px 14px",
+    borderRadius: 10,
+    border: "1px solid rgba(0,0,0,0.12)",
+    background: "#fff",
+    fontSize: 14,
+    boxSizing: "border-box",
   };
 
   return (
@@ -150,29 +200,97 @@ export default function HomePage() {
             place.
           </p>
 
-          <div
-            style={{
-              display: "flex",
-              gap: 10,
-              marginTop: 16,
-              flexWrap: "wrap",
-            }}
-          >
-            {!session ? (
-              <>
-                <button onClick={handleSignIn} style={buttonStyle}>
-                  Sign in
+          {!session ? (
+            <div
+              style={{
+                marginTop: 18,
+                display: "grid",
+                gap: 10,
+                maxWidth: 420,
+              }}
+            >
+              <input
+                type="email"
+                placeholder="Email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                style={inputStyle}
+              />
+
+              <input
+                type="password"
+                placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                style={inputStyle}
+              />
+
+              <div
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  flexWrap: "wrap",
+                }}
+              >
+                <button
+                  onClick={handleSignIn}
+                  disabled={authLoading}
+                  style={{
+                    ...primaryButton,
+                    opacity: authLoading ? 0.7 : 1,
+                  }}
+                >
+                  {authLoading ? "Working..." : "Sign in"}
                 </button>
-                <button onClick={handleSignUp} style={secondaryButtonStyle}>
-                  Sign up
+
+                <button
+                  onClick={handleSignUp}
+                  disabled={authLoading}
+                  style={{
+                    ...secondaryButton,
+                    opacity: authLoading ? 0.7 : 1,
+                  }}
+                >
+                  {authLoading ? "Working..." : "Sign up"}
                 </button>
-              </>
-            ) : (
-              <button onClick={handleSignOut} style={secondaryButtonStyle}>
+              </div>
+
+              {authMessage && (
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 13,
+                    opacity: 0.75,
+                  }}
+                >
+                  {authMessage}
+                </p>
+              )}
+            </div>
+          ) : (
+            <div
+              style={{
+                marginTop: 16,
+                display: "flex",
+                gap: 10,
+                flexWrap: "wrap",
+                alignItems: "center",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 14,
+                  opacity: 0.7,
+                }}
+              >
+                Signed in as {session.user?.email}
+              </div>
+
+              <button onClick={handleSignOut} style={secondaryButton}>
                 Sign out
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         {session && (
@@ -189,7 +307,15 @@ export default function HomePage() {
                 onClick={() => router.push("/tools/turn-thought-into-plan")}
               >
                 <h2 style={{ margin: 0, fontSize: 18 }}>Turn Thought Into Plan</h2>
-                <p style={{ marginTop: 8, marginBottom: 0, opacity: 0.72, fontSize: 14, lineHeight: 1.45 }}>
+                <p
+                  style={{
+                    marginTop: 8,
+                    marginBottom: 0,
+                    opacity: 0.72,
+                    fontSize: 14,
+                    lineHeight: 1.45,
+                  }}
+                >
                   Start with one thought and turn it into a calm, actionable plan.
                 </p>
               </div>
@@ -199,7 +325,15 @@ export default function HomePage() {
                 onClick={() => router.push("/tools/image-maker")}
               >
                 <h2 style={{ margin: 0, fontSize: 18 }}>Image Maker</h2>
-                <p style={{ marginTop: 8, marginBottom: 0, opacity: 0.72, fontSize: 14, lineHeight: 1.45 }}>
+                <p
+                  style={{
+                    marginTop: 8,
+                    marginBottom: 0,
+                    opacity: 0.72,
+                    fontSize: 14,
+                    lineHeight: 1.45,
+                  }}
+                >
                   Create a still image from a prompt or from a saved plan.
                 </p>
               </div>
@@ -209,7 +343,15 @@ export default function HomePage() {
                 onClick={() => router.push("/tools/video-maker")}
               >
                 <h2 style={{ margin: 0, fontSize: 18 }}>Video Maker</h2>
-                <p style={{ marginTop: 8, marginBottom: 0, opacity: 0.72, fontSize: 14, lineHeight: 1.45 }}>
+                <p
+                  style={{
+                    marginTop: 8,
+                    marginBottom: 0,
+                    opacity: 0.72,
+                    fontSize: 14,
+                    lineHeight: 1.45,
+                  }}
+                >
                   Generate short videos from your ideas with a cleaner workflow.
                 </p>
               </div>
@@ -219,7 +361,15 @@ export default function HomePage() {
                 onClick={() => router.push("/tools/library")}
               >
                 <h2 style={{ margin: 0, fontSize: 18 }}>Library</h2>
-                <p style={{ marginTop: 8, marginBottom: 0, opacity: 0.72, fontSize: 14, lineHeight: 1.45 }}>
+                <p
+                  style={{
+                    marginTop: 8,
+                    marginBottom: 0,
+                    opacity: 0.72,
+                    fontSize: 14,
+                    lineHeight: 1.45,
+                  }}
+                >
                   View, reuse, download, and delete your saved creations and plans.
                 </p>
               </div>
@@ -235,7 +385,14 @@ export default function HomePage() {
               }}
             >
               <h3 style={{ marginTop: 0, marginBottom: 8 }}>Suggested flow</h3>
-              <p style={{ margin: 0, opacity: 0.72, lineHeight: 1.5, fontSize: 14 }}>
+              <p
+                style={{
+                  margin: 0,
+                  opacity: 0.72,
+                  lineHeight: 1.5,
+                  fontSize: 14,
+                }}
+              >
                 Start with <strong>Turn Thought Into Plan</strong>, then send the
                 result to <strong>Image Maker</strong> or <strong>Video Maker</strong>.
                 Check everything later in <strong>Library</strong>.
