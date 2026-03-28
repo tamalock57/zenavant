@@ -16,7 +16,8 @@ export default function Navbar() {
     borderRadius: 8,
     cursor: "pointer",
     fontSize: 14,
-    opacity: 0.8,
+    opacity: 0.9,
+    color: "#fff"
   };
 
   return (
@@ -25,9 +26,10 @@ export default function Navbar() {
         position: "sticky",
         top: 0,
         zIndex: 50,
-        background: "#fff",
-        borderBottom: "1px solid rgba(0,0,0,0.06)",
-        padding: "10px 16px",
+        background: "#111",
+        color: "#fff"
+        borderBottom: "1px solid rgba(255,255,255,0.08)",
+        padding: "12px 20px",
         display: "flex",
         justifyContent: "space-between",
         alignItems: "center",
@@ -75,7 +77,18 @@ export default function Navbar() {
           }}
           onClick={handleSignOut}
         >
+
+        <button
+         style={{
+           background: "#fff",
+           color: "#111",
+           borderRadius: 8,
+           padding: "6px 12px",
+           fontWeight: 500,
+         }}
+         >
           Sign out
+        </button>
         </div>
       </div>
     </div>
