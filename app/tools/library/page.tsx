@@ -25,33 +25,20 @@ export default function LibraryPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState("");
-  const [error, setError] = useState("");
 
   async function loadLibrary(showLoading = true) {
     try {
       if (showLoading) setLoading(true);
 
       const res = await fetch("/api/library", {
-        method: "GET",
         cache: "no-store",
       });
 
       const data = await res.json();
 
-      if (!res.ok) {
-        setError(data?.error || "Failed to load library.");
-        setMedia([]);
-        setPlans([]);
-        return;
-      }
-
       setMedia(Array.isArray(data.media) ? data.media : []);
       setPlans(Array.isArray(data.plans) ? data.plans : []);
       setLastRefreshed(new Date().toLocaleTimeString());
-    } catch (err: any) {
-      setError(err?.message || "Library load failed.");
-      setMedia([]);
-      setPlans([]);
     } finally {
       if (showLoading) setLoading(false);
     }
@@ -67,8 +54,7 @@ export default function LibraryPage() {
   }
 
   async function handleDeleteMedia(item: MediaItem) {
-    const confirmDelete = confirm("Delete this item?");
-    if (!confirmDelete) return;
+    if (!confirm("Delete this item?")) return;
 
     await fetch("/api/library/delete", {
       method: "POST",
@@ -85,8 +71,7 @@ export default function LibraryPage() {
   }
 
   async function handleDeletePlan(plan: PlanItem) {
-    const confirmDelete = confirm("Delete this plan?");
-    if (!confirmDelete) return;
+    if (!confirm("Delete this plan?")) return;
 
     await fetch("/api/library/delete-plan", {
       method: "POST",
@@ -121,83 +106,170 @@ export default function LibraryPage() {
   }, []);
 
   return (
-    <main style={{ maxWidth: 1000, margin: "0 auto", padding: 20 }}>
+    <main
+      style={{
+        maxWidth: 900,
+        margin: "0 auto",
+        padding: 20,
+        fontFamily: "system-ui",
+      }}
+    >
       {/* HEADER */}
-      <div style={{ marginBottom: 20 }}>
-        <h1>Library</h1>
-        <p style={{ opacity: 0.7 }}>Your creations and saved plans</p>
+      <div style={{ marginBottom: 24 }}>
+        <h1 style={{ marginBottom: 4 }}>Library</h1>
+        <p style={{ opacity: 0.6 }}>Your creations and saved plans</p>
 
-        <button onClick={refreshLibrary} disabled={refreshing}>
-          {refreshing ? "Refreshing..." : "Refresh"}
-        </button>
+        <div style={{ marginTop: 10 }}>
+          <button
+            onClick={refreshLibrary}
+            disabled={refreshing}
+            style={{
+              padding: "10px 14px",
+              borderRadius: 10,
+              border: "1px solid rgba(0,0,0,0.1)",
+              background: refreshing ? "#ddd" : "#111",
+              color: refreshing ? "#666" : "#fff",
+              cursor: "pointer",
+            }}
+          >
+            {refreshing ? "Refreshing..." : "Refresh"}
+          </button>
 
-        {lastRefreshed && (
-          <p style={{ fontSize: 12, opacity: 0.5 }}>
-            Last refreshed: {lastRefreshed}
-          </p>
-        )}
+          {lastRefreshed && (
+            <p style={{ fontSize: 12, opacity: 0.5, marginTop: 6 }}>
+              Last refreshed: {lastRefreshed}
+            </p>
+          )}
+        </div>
       </div>
 
       {loading && <p>Loading...</p>}
-      {error && <p style={{ color: "red" }}>{error}</p>}
 
       {/* MEDIA */}
       {media.length > 0 && (
         <>
-          <h2>Media</h2>
+          <h2 style={{ marginBottom: 12 }}>Media</h2>
 
-          {media.map((item, i) => (
-            <div key={i} style={{ marginBottom: 20 }}>
-              {item.type === "video" ? (
-                <video src={item.url} controls width="100%" />
-              ) : (
-                <img src={item.url} width="100%" />
-              )}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+              gap: 16,
+              marginBottom: 30,
+            }}
+          >
+            {media.map((item, i) => (
+              <div
+                key={i}
+                style={{
+                  border: "1px solid #eee",
+                  borderRadius: 12,
+                  padding: 10,
+                  background: "#fff",
+                }}
+              >
+                {item.type === "video" ? (
+                  <video
+                    src={item.url}
+                    controls
+                    style={{ width: "100%", borderRadius: 8 }}
+                  />
+                ) : (
+                  <img
+                    src={item.url}
+                    style={{ width: "100%", borderRadius: 8 }}
+                  />
+                )}
 
-              <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-                <button onClick={() => handleDownload(item)}>
-                  Download
-                </button>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    marginTop: 10,
+                  }}
+                >
+                  <button
+                    onClick={() => handleDownload(item)}
+                    style={{
+                      flex: 1,
+                      padding: "8px",
+                      borderRadius: 8,
+                      border: "1px solid #ccc",
+                      background: "#eef4ff",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Download
+                  </button>
 
-                <button onClick={() => handleDeleteMedia(item)}>
-                  Delete
-                </button>
+                  <button
+                    onClick={() => handleDeleteMedia(item)}
+                    style={{
+                      flex: 1,
+                      padding: "8px",
+                      borderRadius: 8,
+                      border: "1px solid #ccc",
+                      background: "#ffe3e3",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </>
       )}
 
       {/* PLANS */}
       {plans.length > 0 && (
         <>
-          <h2>Plans</h2>
+          <h2 style={{ marginBottom: 12 }}>Plans</h2>
 
-          {plans.map((plan, i) => (
-            <div
-              key={i}
-              style={{
-                border: "1px solid #ccc",
-                padding: 12,
-                marginBottom: 12,
-              }}
-            >
-              <h3>{plan.title}</h3>
-              <p>{plan.summary}</p>
+          <div
+            style={{
+              display: "grid",
+              gap: 14,
+            }}
+          >
+            {plans.map((plan, i) => (
+              <div
+                key={i}
+                style={{
+                  border: "1px solid #eee",
+                  borderRadius: 12,
+                  padding: 14,
+                  background: "#fff",
+                }}
+              >
+                <h3 style={{ marginBottom: 6 }}>{plan.title}</h3>
+                <p style={{ opacity: 0.7 }}>{plan.summary}</p>
 
-              {plan.steps && (
-                <ul>
-                  {plan.steps.slice(0, 4).map((s, j) => (
-                    <li key={j}>{s}</li>
-                  ))}
-                </ul>
-              )}
+                {plan.steps && (
+                  <ul style={{ marginTop: 8 }}>
+                    {plan.steps.slice(0, 4).map((s, j) => (
+                      <li key={j}>{s}</li>
+                    ))}
+                  </ul>
+                )}
 
-              <button onClick={() => handleDeletePlan(plan)}>
-                Delete
-              </button>
-            </div>
-          ))}
+                <button
+                  onClick={() => handleDeletePlan(plan)}
+                  style={{
+                    marginTop: 10,
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #ccc",
+                    background: "#ffe3e3",
+                    cursor: "pointer",
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+            ))}
+          </div>
         </>
       )}
     </main>
