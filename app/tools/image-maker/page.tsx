@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export default function ImageMakerPage() {
   const [prompt, setPrompt] = useState("");
@@ -10,6 +10,15 @@ export default function ImageMakerPage() {
   const [error, setError] = useState<string | null>(null);
 
   const canSubmit = prompt.trim().length >= 5;
+
+  useEffect(() => {
+    const savedPrompt = localStorage.getItem("zenavant_prompt");
+
+    if (savedPrompt) {
+      setPrompt(savedPrompt);
+      localStorage.removeItem("zenavant_prompt");
+    }
+  }, []);
 
   async function generate() {
     if (!canSubmit) return;
@@ -31,8 +40,9 @@ export default function ImageMakerPage() {
         setError(data?.error || "Request failed");
         return;
       }
-
-      setImage(data.image);
+      
+      console.log("image-maker response:", data);
+      setImage(data.imageUrl || data.image || null);
     } catch (e: any) {
       setError(e?.message ?? "Something went wrong");
     } finally {
@@ -45,6 +55,7 @@ export default function ImageMakerPage() {
       <h1 style={{ fontSize: 34, fontWeight: 750, marginBottom: 6 }}>
         Image Maker
       </h1>
+
       <p style={{ opacity: 0.8, marginTop: 0 }}>
         Describe an image. Zenavant generates it.
       </p>
@@ -58,14 +69,16 @@ export default function ImageMakerPage() {
           background: "rgba(255,255,255,0.9)",
         }}
       >
-        <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
+        <label
+          style={{ display: "block", fontWeight: 650, marginBottom: 8 }}
+        >
           Prompt
         </label>
 
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Example: A calm minimalist workspace with a notebook and soft morning light, photoreal."
+          placeholder="Example: A calm minimalist workspace with a notebook and soft morning light."
           rows={4}
           style={{
             width: "100%",
@@ -76,11 +89,20 @@ export default function ImageMakerPage() {
             outline: "none",
             background: "#fff",
             color: "#111",
+            resize: "vertical",
           }}
         />
 
-        <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center" }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            marginTop: 12,
+            alignItems: "center",
+          }}
+        >
           <label style={{ fontSize: 14, opacity: 0.85 }}>Size</label>
+
           <select
             value={size}
             onChange={(e) => setSize(e.target.value)}
@@ -91,9 +113,9 @@ export default function ImageMakerPage() {
               background: "#fff",
             }}
           >
-            <option value="1024x1024">1024×1024 (square)</option>
-            <option value="1024x1536">1024×1536 (portrait)</option>
-            <option value="1536x1024">1536×1024 (landscape)</option>
+            <option value="1024x1024">1024x1024 (square)</option>
+            <option value="1024x1536">1024x1536 (portrait)</option>
+            <option value="1536x1024">1536x1024 (landscape)</option>
           </select>
 
           <button
@@ -105,7 +127,8 @@ export default function ImageMakerPage() {
               fontSize: 16,
               borderRadius: 10,
               border: "1px solid rgba(0,0,0,0.2)",
-              background: loading || !canSubmit ? "rgba(0,0,0,0.08)" : "#111",
+              background:
+                loading || !canSubmit ? "rgba(0,0,0,0.08)" : "#111",
               color: loading || !canSubmit ? "#444" : "#fff",
               cursor: loading || !canSubmit ? "not-allowed" : "pointer",
             }}
@@ -140,7 +163,10 @@ export default function ImageMakerPage() {
             background: "rgba(255,255,255,0.9)",
           }}
         >
-          <h2 style={{ fontSize: 18, fontWeight: 750, marginTop: 0 }}>Result</h2>
+          <h2 style={{ fontSize: 18, fontWeight: 750, marginTop: 0 }}>
+            Result
+          </h2>
+
           <img
             src={image}
             alt="Generated"

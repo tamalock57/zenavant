@@ -22,7 +22,10 @@ function parseSeconds(raw: unknown): "4" | "8" | "12" {
   return "8";
 }
 
-function parseSize(raw: unknown, model: ModelName): { label: SizeLabel; w: number; h: number } {
+function parseSize(
+  raw: unknown,
+  model: ModelName
+): { label: SizeLabel; w: number; h: number } {
   const allowedSora2: SizeLabel[] = ["720x1280", "1280x720"];
   const allowedPro: SizeLabel[] = ["720x1280", "1024x1792", "1280x720", "1792x1024"];
   const allowed = model === "sora-2-pro" ? allowedPro : allowedSora2;
@@ -37,7 +40,12 @@ function parseSize(raw: unknown, model: ModelName): { label: SizeLabel; w: numbe
         : "1280x720";
 
   const [wStr, hStr] = label.split("x");
-  return { label, w: Number(wStr), h: Number(hStr) };
+
+  return {
+    label,
+    w: Number(wStr),
+    h: Number(hStr),
+  };
 }
 
 export async function POST(req: Request) {
@@ -47,7 +55,9 @@ export async function POST(req: Request) {
     }
 
     const formData = await req.formData();
-    const file = formData.get("file");
+
+    // Accept either "file" or "image" from mobile
+    const file = formData.get("file") ?? formData.get("image");
     const promptRaw = formData.get("prompt");
     const secondsRaw = formData.get("seconds");
     const sizeRaw = formData.get("size");
@@ -58,7 +68,9 @@ export async function POST(req: Request) {
     }
 
     const prompt =
-      typeof promptRaw === "string" ? promptRaw.trim() : String(promptRaw ?? "").trim();
+      typeof promptRaw === "string"
+        ? promptRaw.trim()
+        : String(promptRaw ?? "").trim();
 
     if (prompt.length < 3) {
       return Response.json({ error: "Missing or too-short prompt" }, { status: 400 });
@@ -68,22 +80,26 @@ export async function POST(req: Request) {
     const seconds = parseSeconds(secondsRaw);
     const sizeObj = parseSize(sizeRaw, model);
 
-    // Read image bytes
     const inputBytes = new Uint8Array(await file.arrayBuffer());
 
-    // Force exact aspect ratio/size
     const resizedPng = await sharp(inputBytes)
-      .resize(sizeObj.w, sizeObj.h, { fit: "cover", position: "center" })
+      .resize(sizeObj.w, sizeObj.h, {
+        fit: "cover",
+        position: "center",
+      })
       .png()
       .toBuffer();
 
-    // Convert to OpenAI-uploadable file
-    // (OpenAI Node SDK supports toFile for uploadable request params) 3
-    const uploadable = await toFile(resizedPng, `input-${sizeObj.label}.png`, { type: "image/png" });
+    const uploadable = await toFile(
+      resizedPng,
+      `input-${sizeObj.label}.png`,
+      { type: "image/png" }
+    );
 
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const client = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
 
-    // Create video job with an image input reference (same pattern as the Sora sample app) 4
     const job = await client.videos.create({
       model,
       prompt,
@@ -99,8 +115,12 @@ export async function POST(req: Request) {
     });
   } catch (error: any) {
     console.error("IMAGE->VIDEO POST ERROR:", error);
+
     return Response.json(
-      { error: "Image-to-video job creation failed", details: error?.message ?? String(error) },
+      {
+        error: "Image-to-video job creation failed",
+        details: error?.message ?? String(error),
+      },
       { status: 500 }
     );
   }
@@ -114,11 +134,15 @@ export async function GET(req: Request) {
     if (!process.env.OPENAI_API_KEY) {
       return Response.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
     }
+
     if (!id) {
       return Response.json({ error: "Missing id" }, { status: 400 });
     }
 
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const client = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+
     const job = await client.videos.retrieve(id);
 
     if (job.status === "failed") {
@@ -136,15 +160,22 @@ export async function GET(req: Request) {
       });
     }
 
-    // Completed: download MP4 content 5
-    const contentRes = await fetch(`https://api.openai.com/v1/videos/${id}/content`, {
-      headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
-    });
+    const contentRes = await fetch(
+      `https://api.openai.com/v1/videos/${id}/content`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+      }
+    );
 
     if (!contentRes.ok) {
       const txt = await contentRes.text().catch(() => "");
       return Response.json(
-        { error: "Failed to download video content", details: txt },
+        {
+          error: "Failed to download video content",
+          details: txt,
+        },
         { status: 500 }
       );
     }
@@ -155,35 +186,48 @@ export async function GET(req: Request) {
     const filename = `${Date.now()}-${Math.random().toString(16).slice(2)}.mp4`;
     const storagePath = `videos/${filename}`;
 
-    const upload = await supabaseAdmin.storage.from("media").upload(storagePath, bytes, {
-      contentType: "video/mp4",
-      upsert: false,
-    });
+    const upload = await supabaseAdmin.storage
+      .from("media")
+      .upload(storagePath, bytes, {
+        contentType: "video/mp4",
+        upsert: false,
+      });
 
     if (upload.error) {
       return Response.json(
-        { error: "Supabase upload failed", details: upload.error.message },
+        {
+          error: "Supabase upload failed",
+          details: upload.error.message,
+        },
         { status: 500 }
       );
     }
 
-    const { data: publicData } = supabaseAdmin.storage.from("media").getPublicUrl(storagePath);
+    const { data: publicData } = supabaseAdmin.storage
+      .from("media")
+      .getPublicUrl(storagePath);
+
     const url = publicData?.publicUrl;
 
     if (!url) {
       return Response.json({ error: "Failed to get public URL" }, { status: 500 });
     }
 
-    // Optional DB insert like your Video Maker does
     const { error: dbError } = await supabaseAdmin.from("media").insert({
       type: "video",
-      prompt: job.prompt,
+      prompt: job.prompt ?? "",
       url,
       storage_path: storagePath,
     });
 
     if (dbError) {
-      return Response.json({ error: "DB insert failed", details: dbError.message }, { status: 500 });
+      return Response.json(
+        {
+          error: "DB insert failed",
+          details: dbError.message,
+        },
+        { status: 500 }
+      );
     }
 
     return Response.json({
@@ -193,10 +237,13 @@ export async function GET(req: Request) {
     });
   } catch (error: any) {
     console.error("IMAGE->VIDEO GET ERROR:", error);
+
     return Response.json(
-      { error: "Status check failed", details: error?.message ?? String(error) },
+      {
+        error: "Status check failed",
+        details: error?.message ?? String(error),
+      },
       { status: 500 }
     );
   }
 }
-

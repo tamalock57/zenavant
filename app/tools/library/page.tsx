@@ -3,125 +3,247 @@
 import { useEffect, useState } from "react";
 
 type MediaItem = {
-  id: string;
-  type: string;
-  prompt: string;
-  url: string;
-  created_at: string;
+  id?: string | number;
+  type?: string;
+  url?: string;
+  prompt?: string;
+  storage_path?: string;
+  created_at?: string;
+};
+
+type PlanItem = {
+  id?: string | number;
+  title?: string;
+  summary?: string;
+  steps?: string[];
+  firstTinyAction?: string;
+  encouragement?: string;
 };
 
 export default function LibraryPage() {
-  const [items, setItems] = useState<MediaItem[]>([]);
+  const [media, setMedia] = useState<MediaItem[]>([]);
+  const [plans, setPlans] = useState<PlanItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState("");
 
-  async function loadMedia() {
+  async function loadLibrary() {
     try {
-      const res = await fetch("/api/library");
+      setError("");
+
+      const res = await fetch("/api/library", {
+        method: "GET",
+        cache: "no-store",
+      });
 
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data?.error || "Failed to load");
+        setError(data?.error || "Failed to load library.");
+        setMedia([]);
+        setPlans([]);
         return;
       }
 
-      setItems(data);
-    } catch (e: any) {
-      setError(e?.message ?? "Something went wrong");
+      setMedia(Array.isArray(data.media) ? data.media : []);
+      setPlans(Array.isArray(data.plans) ? data.plans : []);
+    } catch (err: any) {
+      setError(err?.message || "Library load failed.");
+      setMedia([]);
+      setPlans([]);
     } finally {
       setLoading(false);
     }
   }
 
+  async function refreshLibrary() {
+    try {
+      setRefreshing(true);
+      await loadLibrary();
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  async function handleDelete(item: MediaItem) {
+    const confirmDelete = confirm("Delete this item?");
+    if (!confirmDelete) return;
+
+    await fetch("/api/library/delete", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        id: item.id,
+        storage_path: item.storage_path,
+      }),
+    });
+
+    await loadLibrary();
+  }
+
   useEffect(() => {
-    loadMedia();
+    loadLibrary();
   }, []);
 
+  const isEmpty = media.length === 0 && plans.length === 0;
+
   return (
-    <main style={{ maxWidth: 900, margin: "0 auto", padding: 24 }}>
-      
-      <h1 style={{ fontSize: 34, fontWeight: 750 }}>
-        Zenavant Library
-      </h1>
+    <main style={{ maxWidth: 1100, margin: "0 auto", padding: 24 }}>
+      {/* HEADER */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 20,
+        }}
+      >
+        <div>
+          <h1 style={{ fontSize: 32, margin: 0 }}>Library</h1>
+          <p style={{ opacity: 0.7 }}>
+            Your creations and saved plans
+          </p>
+        </div>
 
-      <p style={{ opacity: 0.8 }}>
-        Everything Zenavant has created.
-      </p>
+        <button
+          onClick={refreshLibrary}
+          disabled={refreshing}
+          style={{
+            padding: "10px 14px",
+            borderRadius: 10,
+            background: "#111",
+            color: "#fff",
+            cursor: "pointer",
+          }}
+        >
+          {refreshing ? "Refreshing..." : "Refresh"}
+        </button>
+      </div>
 
-      {loading && (
-        <p>Loading...</p>
-      )}
+      {/* STATES */}
+      {loading && <p>Loading...</p>}
 
-      {error && (
+      {!loading && error && (
         <p style={{ color: "red" }}>{error}</p>
       )}
 
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(250px,1fr))",
-        gap: 16,
-        marginTop: 20
-      }}>
+      {!loading && !error && isEmpty && (
+        <p>No creations yet.</p>
+      )}
 
-        {items.map((item) => (
+      {/* MEDIA */}
+      {!loading && media.length > 0 && (
+        <>
+          <h2>Media</h2>
 
-          <div key={item.id}
+          <div
             style={{
-              border: "1px solid rgba(0,0,0,0.15)",
-              borderRadius: 12,
-              padding: 12,
-              background: "white"
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+              gap: 16,
+              marginBottom: 30,
             }}
           >
-
-            <div style={{
-              fontSize: 12,
-              opacity: 0.6,
-              marginBottom: 6
-            }}>
-              {item.type}
-            </div>
-
-            {item.type === "image" && (
-
-              <img
-                src={item.url}
+            {media.map((item, index) => (
+              <div
+                key={item.id ?? index}
                 style={{
-                  width: "100%",
-                  borderRadius: 10
+                  padding: 12,
+                  border: "1px solid #ddd",
+                  borderRadius: 10,
                 }}
-              />
+              >
+                {item.type === "video" ? (
+                  <video
+                    src={item.url}
+                    controls
+                    style={{ width: "100%" }}
+                  />
+                ) : (
+                  <img
+                    src={item.url}
+                    alt=""
+                    style={{ width: "100%" }}
+                  />
+                )}
 
-            )}
+                {item.prompt && (
+                  <p style={{ fontSize: 13 }}>{item.prompt}</p>
+                )}
 
-            {item.type === "video" && (
-
-              <video
-                controls
-                src={item.url}
-                style={{
-                  width: "100%",
-                  borderRadius: 10
-                }}
-              />
-
-            )}
-
-            <div style={{
-              marginTop: 8,
-              fontSize: 13,
-              opacity: 0.8
-            }}>
-              {item.prompt}
-            </div>
-
+                {/* ✅ DELETE BUTTON */}
+                <button
+                  onClick={() => handleDelete(item)}
+                  style={{
+                    marginTop: 8,
+                    padding: "6px 10px",
+                    fontSize: 12,
+                    borderRadius: 6,
+                    border: "1px solid #ccc",
+                    background: "#ffdddd",
+                    cursor: "pointer",
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+            ))}
           </div>
+        </>
+      )}
 
-        ))}
+      {/* PLANS */}
+      {!loading && plans.length > 0 && (
+        <>
+          <h2>Plans</h2>
 
-      </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+              gap: 16,
+            }}
+          >
+            {plans.map((plan, index) => (
+              <div
+                key={plan.id ?? index}
+                style={{
+                  padding: 14,
+                  border: "1px solid #ddd",
+                  borderRadius: 10,
+                }}
+              >
+                <h3>{plan.title}</h3>
 
+                {plan.summary && <p>{plan.summary}</p>}
+
+                {plan.steps && (
+                  <ol>
+                    {plan.steps.slice(0, 4).map((s, i) => (
+                      <li key={i}>{s}</li>
+                    ))}
+                  </ol>
+                )}
+
+                {plan.firstTinyAction && (
+                  <p>
+                    <strong>First step:</strong>{" "}
+                    {plan.firstTinyAction}
+                  </p>
+                )}
+
+                {plan.encouragement && (
+                  <p style={{ fontStyle: "italic" }}>
+                    {plan.encouragement}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </main>
   );
 }

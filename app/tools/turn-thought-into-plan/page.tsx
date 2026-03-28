@@ -40,7 +40,7 @@ export default function TurnThoughtIntoPlanPage() {
       }
 
       setPlan(data);
-      setThought(""); // clears after success
+      setThought("");
     } catch (e: any) {
       setError(e?.message ?? "Something went wrong");
     } finally {
@@ -48,11 +48,40 @@ export default function TurnThoughtIntoPlanPage() {
     }
   }
 
+  function buildPlanPrompt() {
+    if (!plan) return;
+
+    return `
+${plan.title || ""}
+${plan.summary || ""}
+${plan.steps?.join(" ") || ""}
+${plan.firstTinyAction || ""}
+${plan.encouragement || ""}
+    `.trim();
+  }
+  
+  function usePlanForImage() {
+    const prompt = buildPlanPrompt();
+    if (!prompt) return;
+
+    localStorage.setItem("zenavant_prompt", prompt);
+    window.location.href = "/tools/image-maker";
+  }
+
+  function usePlanForVideo() {
+    const prompt = buildPlanPrompt();
+    if (!prompt) return;
+
+    localStorage.setItem("zenavant_prompt", prompt);
+    window.location.href = "/tools/video-maker";
+  }
+
   return (
     <main style={{ maxWidth: 760, margin: "0 auto", padding: 24 }}>
       <h1 style={{ fontSize: 34, fontWeight: 750, marginBottom: 6 }}>
         Turn a thought into a plan
       </h1>
+
       <p style={{ opacity: 0.8, marginTop: 0 }}>
         Write one thought. Zenavant turns it into a calm, actionable plan.
       </p>
@@ -66,14 +95,16 @@ export default function TurnThoughtIntoPlanPage() {
           background: "rgba(255,255,255,0.9)",
         }}
       >
-        <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
+        <label
+          style={{ display: "block", fontWeight: 650, marginBottom: 8 }}
+        >
           Your thought
         </label>
 
         <textarea
           value={thought}
           onChange={(e) => setThought(e.target.value)}
-          placeholder="Example: I want to start a small YouTube series but I’m overwhelmed."
+          placeholder='Example: I want to start a small YouTube series but I’m overwhelmed.'
           rows={5}
           style={{
             width: "100%",
@@ -84,10 +115,19 @@ export default function TurnThoughtIntoPlanPage() {
             outline: "none",
             background: "#fff",
             color: "#111",
+            resize: "vertical",
           }}
         />
 
-        <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center" }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            marginTop: 12,
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
           <button
             onClick={generate}
             disabled={loading || !canSubmit}
@@ -96,7 +136,8 @@ export default function TurnThoughtIntoPlanPage() {
               fontSize: 16,
               borderRadius: 10,
               border: "1px solid rgba(0,0,0,0.2)",
-              background: loading || !canSubmit ? "rgba(0,0,0,0.08)" : "#111",
+              background:
+                loading || !canSubmit ? "rgba(0,0,0,0.08)" : "#111",
               color: loading || !canSubmit ? "#444" : "#fff",
               cursor: loading || !canSubmit ? "not-allowed" : "pointer",
             }}
@@ -105,7 +146,7 @@ export default function TurnThoughtIntoPlanPage() {
           </button>
 
           <span style={{ opacity: 0.7, fontSize: 14 }}>
-            {loading ? "One moment…" : "Keep it short and honest."}
+            {loading ? "One moment..." : "Keep it short and honest."}
           </span>
         </div>
 
@@ -138,9 +179,13 @@ export default function TurnThoughtIntoPlanPage() {
           <h2 style={{ fontSize: 22, fontWeight: 750, marginTop: 0 }}>
             {plan.title}
           </h2>
+
           <p style={{ marginTop: 8 }}>{plan.summary}</p>
 
-          <h3 style={{ marginTop: 14, fontSize: 18, fontWeight: 750 }}>Steps</h3>
+          <h3 style={{ marginTop: 14, fontSize: 18, fontWeight: 750 }}>
+            Steps
+          </h3>
+
           <ol style={{ marginTop: 8, paddingLeft: 18 }}>
             {plan.steps.map((s, i) => (
               <li key={i} style={{ marginBottom: 6 }}>
@@ -152,11 +197,56 @@ export default function TurnThoughtIntoPlanPage() {
           <h3 style={{ marginTop: 14, fontSize: 18, fontWeight: 750 }}>
             First tiny action
           </h3>
+
           <p style={{ marginTop: 8 }}>{plan.firstTinyAction}</p>
 
           <p style={{ marginTop: 14, opacity: 0.85 }}>{plan.encouragement}</p>
+
+          <div
+           style={{
+            display: "flex",
+            gap: 10,
+            marginTop: 16,
+            flexWrap: "wrap",
+           }}
+           
+           >
+
+           
+          <button
+            onClick={usePlanForImage}
+            style={{
+              padding: "10px 14px",
+              fontSize: 15,
+              borderRadius: 10,
+              border: "1px solid rgba(0,0,0,0.2)",
+              background: "#111",
+              color: "#fff",
+              cursor: "pointer",
+            }}
+          >
+            Use for image
+          </button>
+          
+          <button
+            onClick={usePlanForVideo}
+            style={{
+              padding: "10px 14px",
+              fontSize: 15,
+              borderRadius: 10,
+              border: "1px solid rgba(0,0,0,0.2)",
+              background: "#fff",
+              color: "#111",
+              cursor: "pointer",
+            }}
+
+          >
+      
+            Use for video
+          </button>
+         </div>
         </section>
       )}
-    </main>
-  );
-}
+      </main>
+    );
+  }

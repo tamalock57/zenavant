@@ -20,6 +20,15 @@ export default function VideoMakerPage() {
   const canSubmit = prompt.trim().length >= 5;
   const pollTimer = useRef<number | null>(null);
 
+  useEffect(() => {
+  const savedPrompt = localStorage.getItem("zenavant_prompt");
+
+  if (savedPrompt) {
+    setPrompt(savedPrompt);
+    localStorage.removeItem("zenavant_prompt");
+  }
+}, []);
+
   function stopPolling() {
     if (pollTimer.current) {
       window.clearInterval(pollTimer.current);
