@@ -357,6 +357,42 @@ export default function HomePage() {
               </div>
 
               <div
+  style={cardStyle}
+  onClick={() => router.push("/tools/image-to-video")}
+>
+  <h2 style={{ margin: 0, fontSize: 18 }}>Image → Video</h2>
+  <p
+    style={{
+      marginTop: 8,
+      marginBottom: 0,
+      opacity: 0.72,
+      fontSize: 14,
+      lineHeight: 1.45,
+    }}
+  >
+    Turn a still image into a cinematic video.
+  </p>
+</div>
+
+<div
+  style={cardStyle}
+  onClick={() => router.push("/tools/audio-to-video")}
+>
+  <h2 style={{ margin: 0, fontSize: 18 }}>Audio → Video</h2>
+  <p
+    style={{
+      marginTop: 8,
+      marginBottom: 0,
+      opacity: 0.72,
+      fontSize: 14,
+      lineHeight: 1.45,
+    }}
+  >
+    Create a visual story from your audio.
+  </p>
+</div>
+
+              <div
                 style={cardStyle}
                 onClick={() => router.push("/tools/library")}
               >
