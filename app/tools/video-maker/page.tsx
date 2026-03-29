@@ -14,20 +14,24 @@ export default function VideoMakerPage() {
   const [status, setStatus] = useState<JobStatus | null>(null);
   const [progress, setProgress] = useState<number>(0);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
-
   const [error, setError] = useState<string | null>(null);
 
-  const canSubmit = prompt.trim().length >= 5;
   const pollTimer = useRef<number | null>(null);
+  const hasHandledComplete = useRef(false);
+
+  const canSubmit = prompt.trim().length >= 5;
 
   useEffect(() => {
-  const saved = localStorage.getItem("zenavant_prompt");
+    const saved = localStorage.getItem("zenavant_prompt");
+    if (saved) {
+      setPrompt(saved);
+      localStorage.removeItem("zenavant_prompt");
+    }
+  }, []);
 
-  if (saved) {
-    setPrompt(saved);
-    localStorage.removeItem("zenavant_prompt");
-  }
-}, []);
+  useEffect(() => {
+    return () => stopPolling();
+  }, []);
 
   function stopPolling() {
     if (pollTimer.current) {
@@ -38,11 +42,16 @@ export default function VideoMakerPage() {
 
   async function poll(id: string) {
     try {
-      const res = await fetch(`/api/video-maker?id=${encodeURIComponent(id)}`);
+      const res = await fetch(`/api/video-maker?id=${encodeURIComponent(id)}`, {
+        cache: "no-store",
+      });
+
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data?.error || "Status check failed");
+        if (!hasHandledComplete.current) {
+          setError(data?.error || "Status check failed");
+        }
         stopPolling();
         setLoading(false);
         return;
@@ -52,19 +61,29 @@ export default function VideoMakerPage() {
       setProgress(typeof data.progress === "number" ? data.progress : 0);
 
       if (data.status === "completed") {
-        setVideoUrl(data.downloadUrl);
+        if (!hasHandledComplete.current) {
+          hasHandledComplete.current = true;
+          setVideoUrl(data.downloadUrl || null);
+          setStatus("completed");
+          setProgress(100);
+          setLoading(false);
+          setPrompt("");
+        }
+
         stopPolling();
-        setLoading(false);
-        setPrompt("");
+        return;
       }
 
       if (data.status === "failed") {
-        setError(data.error || "Video failed");
+        setError(data?.error || "Video failed");
         stopPolling();
         setLoading(false);
+        return;
       }
     } catch (e: any) {
-      setError(e?.message ?? "Polling failed");
+      if (!hasHandledComplete.current) {
+        setError(e?.message ?? "Polling failed");
+      }
       stopPolling();
       setLoading(false);
     }
@@ -74,6 +93,8 @@ export default function VideoMakerPage() {
     if (!canSubmit) return;
 
     stopPolling();
+    hasHandledComplete.current = false;
+
     setLoading(true);
     setError(null);
     setVideoUrl(null);
@@ -100,42 +121,90 @@ export default function VideoMakerPage() {
       setStatus(data.status);
       setProgress(typeof data.progress === "number" ? data.progress : 0);
 
-      pollTimer.current = window.setInterval(() => poll(data.id), 2000) as unknown as number;
+      pollTimer.current = window.setInterval(() => {
+        poll(data.id);
+      }, 2000) as unknown as number;
     } catch (e: any) {
       setError(e?.message ?? "Something went wrong");
       setLoading(false);
     }
   }
 
-  useEffect(() => () => stopPolling(), []);
-
   return (
     <main style={{ maxWidth: 760, margin: "0 auto", padding: 24 }}>
-      <h1 style={{ fontSize: 34, fontWeight: 750, marginBottom: 6 }}>Video Maker</h1>
-      <p style={{ opacity: 0.8, marginTop: 0 }}>Describe a short video. Zenavant generates it.</p>
+      <h1 style={{ fontSize: 34, fontWeight: 750, marginBottom: 6 }}>
+        Video Maker
+      </h1>
 
-      <div style={{ marginTop: 16, padding: 16, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 12, background: "rgba(255,255,255,0.9)" }}>
-        <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>Prompt</label>
+      <p style={{ opacity: 0.8, marginTop: 0 }}>
+        Describe a short video. Zenavant generates it.
+      </p>
+
+      <div
+        style={{
+          marginTop: 16,
+          padding: 16,
+          border: "1px solid rgba(0,0,0,0.12)",
+          borderRadius: 12,
+          background: "#fff",
+        }}
+      >
+        <label
+          style={{ display: "block", fontWeight: 650, marginBottom: 8 }}
+        >
+          Prompt
+        </label>
 
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           placeholder="Example: A calm cinematic shot of a desk by a window. Slow camera push-in."
           rows={4}
-          style={{ width: "100%", padding: 12, fontSize: 16, borderRadius: 10, border: "1px solid rgba(0,0,0,0.18)", outline: "none", background: "#fff", color: "#111" }}
+          style={{
+            width: "100%",
+            padding: 12,
+            fontSize: 16,
+            borderRadius: 10,
+            border: "1px solid rgba(0,0,0,0.12)",
+            boxSizing: "border-box",
+          }}
         />
 
-        <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            marginTop: 12,
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
           <label style={{ fontSize: 14, opacity: 0.85 }}>Size</label>
-          <select value={size} onChange={(e) => setSize(e.target.value)} style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(0,0,0,0.2)", background: "#fff" }}>
-            <option value="1280x720">1280×720 (landscape)</option>
-            <option value="720x1280">720×1280 (portrait)</option>
-            <option value="1792x1024">1792×1024 (wide HD)</option>
-            <option value="1024x1792">1024×1792 (tall HD)</option>
+          <select
+            value={size}
+            onChange={(e) => setSize(e.target.value)}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 10,
+              border: "1px solid rgba(0,0,0,0.12)",
+            }}
+          >
+            <option value="1280x720">1280x720 (landscape)</option>
+            <option value="720x1280">720x1280 (portrait)</option>
+            <option value="1792x1024">1792x1024 (wide HD)</option>
+            <option value="1024x1792">1024x1792 (tall HD)</option>
           </select>
 
           <label style={{ fontSize: 14, opacity: 0.85 }}>Seconds</label>
-          <select value={seconds} onChange={(e) => setSeconds(e.target.value)} style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(0,0,0,0.2)", background: "#fff" }}>
+          <select
+            value={seconds}
+            onChange={(e) => setSeconds(e.target.value)}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 10,
+              border: "1px solid rgba(0,0,0,0.12)",
+            }}
+          >
             <option value="4">4</option>
             <option value="8">8</option>
             <option value="12">12</option>
@@ -161,24 +230,60 @@ export default function VideoMakerPage() {
 
         {(jobId || status) && (
           <div style={{ marginTop: 12, fontSize: 14, opacity: 0.85 }}>
-            <div><b>Status:</b> {status ?? "—"}</div>
-            <div><b>Progress:</b> {progress}%</div>
+            <div>
+              <b>Status:</b> {status ?? "-"}
+            </div>
+            <div>
+              <b>Progress:</b> {progress}%
+            </div>
           </div>
         )}
 
         {error && (
-          <div style={{ marginTop: 12, padding: 12, borderRadius: 10, border: "1px solid rgba(220, 38, 38, 0.35)", background: "rgba(220, 38, 38, 0.06)", color: "#7f1d1d" }}>
+          <div
+            style={{
+              marginTop: 12,
+              padding: 12,
+              borderRadius: 10,
+              border: "1px solid rgba(220,38,38,0.25)",
+              background: "rgba(254,242,242,1)",
+              color: "#991b1b",
+            }}
+          >
             {error}
           </div>
         )}
       </div>
 
       {videoUrl && (
-        <section style={{ marginTop: 18, padding: 16, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 12, background: "rgba(255,255,255,0.9)" }}>
-          <h2 style={{ fontSize: 18, fontWeight: 750, marginTop: 0 }}>Result</h2>
-          <video controls src={videoUrl} style={{ marginTop: 10, width: "100%", height: "auto", borderRadius: 12, border: "1px solid rgba(0,0,0,0.12)" }} />
+        <section
+          style={{
+            marginTop: 18,
+            padding: 16,
+            border: "1px solid rgba(0,0,0,0.12)",
+            borderRadius: 12,
+            background: "#fff",
+          }}
+        >
+          <h2 style={{ fontSize: 18, fontWeight: 750, marginTop: 0 }}>
+            Result
+          </h2>
+
+          <video
+            controls
+            src={videoUrl}
+            style={{
+              marginTop: 10,
+              width: "100%",
+              height: "auto",
+              borderRadius: 10,
+            }}
+          />
+
           <div style={{ marginTop: 10 }}>
-            <a href={videoUrl} download style={{ fontSize: 14 }}>Download video</a>
+            <a href={videoUrl} download style={{ fontSize: 14 }}>
+              Download video
+            </a>
           </div>
         </section>
       )}
