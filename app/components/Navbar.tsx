@@ -14,12 +14,13 @@ export default function Navbar() {
 
   function getLinkStyle(active: boolean): React.CSSProperties {
     return {
+      letterSpacing: "0.3px",
       padding: "6px 10px",
       borderRadius: 8,
       cursor: "pointer",
       fontSize: 14,
       color: "#fff",
-      opacity: active ? 1 : 0.78,
+      opacity: active ? 1 : 0.6,
       background: active ? "rgba(255,255,255,0.18)" : "transparent",
       transition: "all 0.2s ease",
       fontWeight: active ? 700 : 500,

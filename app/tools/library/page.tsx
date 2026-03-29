@@ -25,10 +25,12 @@ export default function LibraryPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState("");
+  const [message, setMessage] = useState("");
 
   async function loadLibrary(showLoading = true) {
     try {
       if (showLoading) setLoading(true);
+      setMessage("");
 
       const res = await fetch("/api/library", {
         cache: "no-store",
@@ -48,6 +50,7 @@ export default function LibraryPage() {
     try {
       setRefreshing(true);
       await loadLibrary(false);
+      setMessage("Library refreshed.");
     } finally {
       setRefreshing(false);
     }
@@ -68,6 +71,7 @@ export default function LibraryPage() {
     });
 
     await loadLibrary(false);
+    setMessage("Media deleted.");
   }
 
   async function handleDeletePlan(plan: PlanItem) {
@@ -84,6 +88,7 @@ export default function LibraryPage() {
     });
 
     await loadLibrary(false);
+    setMessage("Plan deleted.");
   }
 
   async function handleDownload(item: MediaItem) {
@@ -99,16 +104,19 @@ export default function LibraryPage() {
     a.click();
 
     window.URL.revokeObjectURL(url);
+    setMessage("Download started.");
   }
 
   function buildPlanPrompt(plan: PlanItem) {
-    return `
-${plan.title || ""}
-${plan.summary || ""}
-${plan.steps?.join(" ") || ""}
-${plan.firstTinyAction || ""}
-${plan.encouragement || ""}
-    `.trim();
+    return [
+      plan.title || "",
+      plan.summary || "",
+      ...(plan.steps || []),
+      plan.firstTinyAction || "",
+      plan.encouragement || "",
+    ]
+      .join(" ")
+      .trim();
   }
 
   function usePlanForImage(plan: PlanItem) {
@@ -125,6 +133,21 @@ ${plan.encouragement || ""}
 
     localStorage.setItem("zenavant_prompt", prompt);
     window.location.href = "/tools/video-maker";
+  }
+
+  async function copyPlan(plan: PlanItem) {
+    const text = [
+      plan.title || "",
+      plan.summary || "",
+      ...(plan.steps || []),
+      plan.firstTinyAction ? `First tiny action: ${plan.firstTinyAction}` : "",
+      plan.encouragement || "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    await navigator.clipboard.writeText(text);
+    setMessage("Plan copied.");
   }
 
   useEffect(() => {
@@ -144,7 +167,15 @@ ${plan.encouragement || ""}
         <h1 style={{ marginBottom: 4 }}>Library</h1>
         <p style={{ opacity: 0.6 }}>Your creations and saved plans</p>
 
-        <div style={{ marginTop: 10 }}>
+        <div
+          style={{
+            marginTop: 10,
+            display: "flex",
+            gap: 10,
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
           <button
             onClick={refreshLibrary}
             disabled={refreshing}
@@ -161,11 +192,15 @@ ${plan.encouragement || ""}
           </button>
 
           {lastRefreshed && (
-            <p style={{ fontSize: 12, opacity: 0.5, marginTop: 6 }}>
+            <span style={{ fontSize: 12, opacity: 0.5 }}>
               Last refreshed: {lastRefreshed}
-            </p>
+            </span>
           )}
         </div>
+
+        {message && (
+          <p style={{ marginTop: 10, fontSize: 13, opacity: 0.7 }}>{message}</p>
+        )}
       </div>
 
       {loading && <p>Loading...</p>}
@@ -204,6 +239,12 @@ ${plan.encouragement || ""}
                     alt=""
                     style={{ width: "100%", borderRadius: 8 }}
                   />
+                )}
+
+                {item.prompt && (
+                  <p style={{ marginTop: 10, fontSize: 13, opacity: 0.72 }}>
+                    {item.prompt}
+                  </p>
                 )}
 
                 <div
@@ -322,6 +363,19 @@ ${plan.encouragement || ""}
                     }}
                   >
                     Use for video
+                  </button>
+
+                  <button
+                    onClick={() => copyPlan(plan)}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #ccc",
+                      background: "#f5f5f5",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Copy
                   </button>
 
                   <button
