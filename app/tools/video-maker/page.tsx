@@ -21,10 +21,10 @@ export default function VideoMakerPage() {
   const pollTimer = useRef<number | null>(null);
 
   useEffect(() => {
-  const savedPrompt = localStorage.getItem("zenavant_prompt");
+  const saved = localStorage.getItem("zenavant_prompt");
 
-  if (savedPrompt) {
-    setPrompt(savedPrompt);
+  if (saved) {
+    setPrompt(saved);
     localStorage.removeItem("zenavant_prompt");
   }
 }, []);

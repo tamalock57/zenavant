@@ -12,10 +12,10 @@ export default function ImageMakerPage() {
   const canSubmit = prompt.trim().length >= 5;
 
   useEffect(() => {
-    const savedPrompt = localStorage.getItem("zenavant_prompt");
+    const saved = localStorage.getItem("zenavant_prompt");
 
-    if (savedPrompt) {
-      setPrompt(savedPrompt);
+    if (saved) {
+      setPrompt(saved);
       localStorage.removeItem("zenavant_prompt");
     }
   }, []);
