@@ -39,7 +39,7 @@ export async function POST(req: Request) {
     }
 
     const job = await openai.videos.create({
-      model: "sora-2-pro",
+      model: "sora-2",
       prompt,
       seconds: secondsRaw as "4" | "8" | "12",
       size: size as "1280x720" | "720x1280",
