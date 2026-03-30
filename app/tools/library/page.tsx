@@ -2,16 +2,18 @@
 
 import { useEffect, useState } from "react";
 
-type MediaItem = {
+type Item = {
   id: string;
   type: string;
-  url: string;
+  url?: string | null;
   storage_path?: string | null;
   prompt?: string | null;
+  item_kind?: string;
+  created_at?: string;
 };
 
 export default function LibraryPage() {
-  const [media, setMedia] = useState<MediaItem[]>([]);
+  const [items, setItems] = useState<Item[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
 
   async function load() {
@@ -20,40 +22,21 @@ export default function LibraryPage() {
     });
 
     const data = await res.json();
-
-    if (Array.isArray(data)) {
-      setMedia(data);
-      return;
-    }
-
-    if (Array.isArray(data?.items)) {
-      setMedia(data.items);
-      return;
-    }
-
-    if (Array.isArray(data?.media)) {
-      setMedia(data.media);
-      return;
-    }
-
-    setMedia([]);
+    setItems(data.items || []);
   }
 
   useEffect(() => {
     load();
   }, []);
 
-  function toggle(id?: string) {
-    if (!id) return;
-
+  function toggle(id: string) {
     setSelected((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
   }
 
   function selectAll() {
-    const ids = media.map((m) => m.id).filter(Boolean);
-    setSelected(ids);
+    setSelected(items.map((i) => i.id));
   }
 
   function deselectAll() {
@@ -61,84 +44,37 @@ export default function LibraryPage() {
   }
 
   async function deleteSelected() {
-    for (const m of media) {
-      if (m.id && selected.includes(m.id)) {
+    for (const item of items) {
+      if (selected.includes(item.id)) {
         await fetch("/api/library/delete", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            id: m.id,
-            storage_path: m.storage_path,
+            id: item.id,
+            storage_path: item.storage_path,
           }),
         });
       }
     }
 
     setSelected([]);
-    await load();
+    load();
   }
 
   return (
     <main style={{ padding: 24, maxWidth: 1100, margin: "0 auto" }}>
-      <h1 style={{ marginTop: 0 }}>Library</h1>
+      <h1>Library</h1>
 
-      <div
-        style={{
-          display: "flex",
-          gap: 10,
-          flexWrap: "wrap",
-          marginBottom: 16,
-        }}
-      >
-        <button
-          onClick={selectAll}
-          style={{
-            padding: "10px 14px",
-            borderRadius: 10,
-            border: "1px solid rgba(0,0,0,0.16)",
-            background: "#fff",
-            cursor: "pointer",
-            fontWeight: 600,
-          }}
-        >
-          Select All
-        </button>
-
-        <button
-          onClick={deselectAll}
-          style={{
-            padding: "10px 14px",
-            borderRadius: 10,
-            border: "1px solid rgba(0,0,0,0.16)",
-            background: "#fff",
-            cursor: "pointer",
-            fontWeight: 600,
-          }}
-        >
-          Deselect
-        </button>
-
-        <button
-          onClick={deleteSelected}
-          disabled={selected.length === 0}
-          style={{
-            padding: "10px 14px",
-            borderRadius: 10,
-            border: "1px solid rgba(0,0,0,0.16)",
-            background: selected.length === 0 ? "rgba(0,0,0,0.08)" : "#111",
-            color: selected.length === 0 ? "#444" : "#fff",
-            cursor: selected.length === 0 ? "not-allowed" : "pointer",
-            fontWeight: 600,
-          }}
-        >
+      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+        <button onClick={selectAll}>Select All</button>
+        <button onClick={deselectAll}>Deselect</button>
+        <button onClick={deleteSelected} disabled={selected.length === 0}>
           Delete
         </button>
       </div>
 
-      {media.length === 0 ? (
-        <div style={{ opacity: 0.7 }}>No generations yet.</div>
+      {items.length === 0 ? (
+        <div>No items yet.</div>
       ) : (
         <div
           style={{
@@ -147,11 +83,11 @@ export default function LibraryPage() {
             gap: 12,
           }}
         >
-          {media.map((m) => (
+          {items.map((item) => (
             <div
-              key={m.id}
+              key={item.id}
               style={{
-                border: selected.includes(m.id)
+                border: selected.includes(item.id)
                   ? "2px solid #111"
                   : "1px solid #ccc",
                 borderRadius: 12,
@@ -160,29 +96,47 @@ export default function LibraryPage() {
               }}
             >
               <div style={{ marginBottom: 8 }}>
-                <label style={{ fontSize: 14 }}>
-                  <input
-                    type="checkbox"
-                    checked={m.id ? selected.includes(m.id) : false}
-                    onChange={() => toggle(m.id)}
-                    style={{ marginRight: 6 }}
-                  />
-                  Select
-                </label>
+                <input
+                  type="checkbox"
+                  checked={selected.includes(item.id)}
+                  onChange={() => toggle(item.id)}
+                />
+                <span style={{ marginLeft: 6 }}>Select</span>
               </div>
 
-              {m.type === "video" ? (
+              {/* VIDEO */}
+              {item.type === "video" && item.url && (
                 <video
-                  src={m.url}
+                  src={item.url}
                   controls
                   style={{ width: "100%", borderRadius: 8 }}
                 />
-              ) : (
+              )}
+
+              {/* IMAGE */}
+              {item.type === "image" && item.url && (
                 <img
-                  src={m.url}
-                  alt={m.prompt ?? "Library item"}
+                  src={item.url}
+                  alt="Library item"
                   style={{ width: "100%", borderRadius: 8 }}
                 />
+              )}
+
+              {/* PLAN */}
+              {item.type === "plan" && (
+                <div
+                  style={{
+                    padding: 12,
+                    borderRadius: 8,
+                    background: "rgba(0,0,0,0.05)",
+                    fontSize: 14,
+                  }}
+                >
+                  <b>Plan</b>
+                  <div style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>
+                    {item.prompt || "No content"}
+                  </div>
+                </div>
               )}
             </div>
           ))}
