@@ -1,259 +1,249 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { supabase } from "@/lib/supabaseClient";
 
 type Item = {
   id: string;
   type: string;
+  prompt?: string | null;
   url?: string | null;
   storage_path?: string | null;
-  prompt?: string | null;
-  content?: string | null;
-  plan?: string | null;
-  summary?: string | null;
-  title?: string | null;
-  item_kind?: string;
-  created_at?: string;
+  created_at?: string | null;
 };
+
+function getPublicUrl(storagePath?: string | null) {
+  if (!storagePath) return null;
+
+  const { data } = supabase.storage.from("media").getPublicUrl(storagePath);
+  return data?.publicUrl ?? null;
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return "Unknown date";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown date";
+
+  return date.toLocaleString();
+}
 
 export default function LibraryPage() {
   const [items, setItems] = useState<Item[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const [deleting, setDeleting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  async function load() {
+  async function loadLibrary() {
     try {
-      setLoading(true);
+      setError(null);
 
-      const res = await fetch("/api/library", {
-        cache: "no-store",
-      });
+      const { data, error } = await supabase
+        .from("media")
+        .select("id, type, prompt, url, storage_path, created_at")
+        .order("created_at", { ascending: false });
 
-      const data = await res.json();
+      if (error) throw error;
 
-      if (Array.isArray(data?.items)) {
-        setItems(data.items);
-      } else if (Array.isArray(data)) {
-        setItems(data);
-      } else {
-        setItems([]);
-      }
+      setItems(data ?? []);
+    } catch (err) {
+      console.error("Library load failed:", err);
+      setError("Could not load library.");
     } finally {
       setLoading(false);
+      setRefreshing(false);
+    }
+  }
+
+  async function refreshLibrary() {
+    setRefreshing(true);
+    await loadLibrary();
+  }
+
+  async function handleDelete(item: Item) {
+    const confirmed = window.confirm("Delete this item from the library?");
+    if (!confirmed) return;
+
+    try {
+      setDeletingId(item.id);
+
+      if (item.storage_path) {
+        const { error: storageError } = await supabase.storage
+          .from("media")
+          .remove([item.storage_path]);
+
+        if (storageError) {
+          console.warn("Storage delete warning:", storageError.message);
+        }
+      }
+
+      const { error: dbError } = await supabase
+        .from("media")
+        .delete()
+        .eq("id", item.id);
+
+      if (dbError) throw dbError;
+
+      setItems((prev) => prev.filter((x) => x.id !== item.id));
+    } catch (err) {
+      console.error("Delete failed:", err);
+      alert("Delete failed.");
+    } finally {
+      setDeletingId(null);
     }
   }
 
   useEffect(() => {
-    load();
+    loadLibrary();
   }, []);
 
-  function toggle(id: string) {
-    setSelected((prev) =>
-      prev.includes(id)
-        ? prev.filter((x) => x !== id)
-        : [...prev, id]
-    );
-  }
+  const preparedItems = useMemo(() => {
+    return items.map((item) => {
+      const mediaUrl = item.url || getPublicUrl(item.storage_path);
+      const normalizedType = (item.type || "").toLowerCase();
 
-  function selectAll() {
-    setSelected(items.map((i) => i.id));
-  }
+      const isPlan =
+        normalizedType.includes("plan") ||
+        normalizedType === "text" ||
+        normalizedType === "thought-plan";
 
-  function deselectAll() {
-    setSelected([]);
-  }
+      const isVideo = normalizedType.includes("video");
+      const isImage = normalizedType.includes("image");
 
-  async function deleteSelected() {
-    if (selected.length === 0) return;
-    if (!confirm(`Delete ${selected.length} item(s)?`)) return;
-
-    try {
-      setDeleting(true);
-
-      for (const item of items) {
-        if (!selected.includes(item.id)) continue;
-
-        const route =
-          item.type === "plan" || item.item_kind === "plan"
-            ? "/api/library/delete-plan"
-            : "/api/library/delete";
-
-        await fetch(route, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            id: item.id,
-            storage_path: item.storage_path,
-          }),
-        });
-      }
-
-      setSelected([]);
-      await load();
-    } finally {
-      setDeleting(false);
-    }
-  }
-
-  function getPlanText(item: Item) {
-    return (
-      item.prompt ||
-      item.content ||
-      item.plan ||
-      item.summary ||
-      "No content"
-    );
-  }
+      return {
+        ...item,
+        mediaUrl,
+        isPlan,
+        isVideo,
+        isImage,
+      };
+    });
+  }, [items]);
 
   return (
-    <main style={{ padding: 24, maxWidth: 1100, margin: "0 auto" }}>
-      <h1 style={{ marginBottom: 16 }}>Library</h1>
-
-      {/* ACTION BAR */}
-      <div
-        style={{
-          display: "flex",
-          gap: 10,
-          marginBottom: 16,
-          flexWrap: "wrap",
-        }}
-      >
-        <button
-          onClick={selectAll}
-          style={{
-            padding: "10px 14px",
-            borderRadius: 10,
-            border: "1px solid #ccc",
-            background: "#fff",
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
-        >
-          Select All
-        </button>
+    <main className="mx-auto max-w-6xl px-4 py-8">
+      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight">Library</h1>
+          <p className="mt-2 text-sm text-gray-600">
+            Your saved images, videos, and plans.
+          </p>
+        </div>
 
         <button
-          onClick={deselectAll}
-          style={{
-            padding: "10px 14px",
-            borderRadius: 10,
-            border: "1px solid #ccc",
-            background: "#fff",
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
+          onClick={refreshLibrary}
+          disabled={refreshing}
+          className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          Deselect All
-        </button>
-
-        <button
-          onClick={deleteSelected}
-          disabled={selected.length === 0 || deleting}
-          style={{
-            padding: "10px 14px",
-            borderRadius: 10,
-            border: "1px solid #ccc",
-            background:
-              selected.length === 0 || deleting ? "#ddd" : "#111",
-            color:
-              selected.length === 0 || deleting ? "#666" : "#fff",
-            fontWeight: 600,
-            cursor:
-              selected.length === 0 || deleting
-                ? "not-allowed"
-                : "pointer",
-          }}
-        >
-          {deleting ? "Deleting..." : "Delete"}
+          {refreshing ? "Refreshing..." : "Refresh"}
         </button>
       </div>
 
-      {/* CONTENT */}
       {loading ? (
-        <div>Loading...</div>
-      ) : items.length === 0 ? (
-        <div>No items yet.</div>
+        <div className="rounded-2xl border bg-white p-8 text-sm text-gray-600 shadow-sm">
+          Loading library...
+        </div>
+      ) : error ? (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-8 text-sm text-red-700 shadow-sm">
+          {error}
+        </div>
+      ) : preparedItems.length === 0 ? (
+        <div className="rounded-2xl border bg-white p-8 text-sm text-gray-600 shadow-sm">
+          No media yet.
+        </div>
       ) : (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns:
-              "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: 12,
-          }}
-        >
-          {items.map((item) => (
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {preparedItems.map((item) => (
             <div
               key={item.id}
-              style={{
-                border: selected.includes(item.id)
-                  ? "2px solid #111"
-                  : "1px solid #ccc",
-                borderRadius: 12,
-                padding: 10,
-                background: "#fff",
-                boxShadow:
-                  "0 4px 12px rgba(0,0,0,0.06)",
-              }}
+              className="overflow-hidden rounded-2xl border bg-white shadow-sm"
             >
-              {/* SELECT */}
-              <div style={{ marginBottom: 8 }}>
-                <input
-                  type="checkbox"
-                  checked={selected.includes(item.id)}
-                  onChange={() => toggle(item.id)}
-                />
-                <span style={{ marginLeft: 6 }}>Select</span>
+              <div className="aspect-video bg-gray-100">
+                {item.isPlan ? (
+                  <div className="flex h-full flex-col justify-between p-5">
+                    <div>
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        Plan
+                      </div>
+                      <p className="line-clamp-6 text-sm leading-6 text-gray-800">
+                        {item.prompt || "Saved plan"}
+                      </p>
+                    </div>
+
+                    <div className="mt-4">
+                      <Link
+                        href="/tools/turn-thought-into-plan"
+                        className="inline-flex rounded-lg bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
+                      >
+                        Open Plan Tool
+                      </Link>
+                    </div>
+                  </div>
+                ) : item.isVideo && item.mediaUrl ? (
+                  <video
+                    src={item.mediaUrl}
+                    controls
+                    className="h-full w-full object-cover"
+                  />
+                ) : item.isImage && item.mediaUrl ? (
+                  <img
+                    src={item.mediaUrl}
+                    alt="Saved media"
+                    className="h-full w-full object-cover"
+                  />
+                ) : item.mediaUrl ? (
+                  <img
+                    src={item.mediaUrl}
+                    alt="Saved media"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center px-4 text-center text-sm text-gray-500">
+                    Broken media source
+                  </div>
+                )}
               </div>
 
-              {/* VIDEO */}
-              {item.type === "video" && item.url ? (
-                <video
-                  src={item.url}
-                  controls
-                  style={{ width: "100%", borderRadius: 8 }}
-                />
-              ) : item.type === "image" && item.url ? (
-                <img
-                  src={item.url}
-                  alt="Library item"
-                  style={{ width: "100%", borderRadius: 8 }}
-                />
-              ) : item.type === "plan" ||
-                item.item_kind === "plan" ? (
-                <div
-                  style={{
-                    padding: 12,
-                    borderRadius: 8,
-                    background: "rgba(0,0,0,0.05)",
-                    fontSize: 14,
-                  }}
-                >
-                  <b>{item.title || "Plan"}</b>
-                  <div
-                    style={{
-                      marginTop: 6,
-                      whiteSpace: "pre-wrap",
-                    }}
+              <div className="p-4">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">
+                    {item.type || "unknown"}
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    {formatDate(item.created_at)}
+                  </span>
+                </div>
+
+                {!item.isPlan && (
+                  <p className="mb-4 line-clamp-3 text-sm leading-6 text-gray-700">
+                    {item.prompt || "No prompt saved."}
+                  </p>
+                )}
+
+                <div className="flex flex-wrap gap-2">
+                  {item.mediaUrl && !item.isPlan && (
+                    <a
+                      href={item.mediaUrl}
+                      download
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-800 transition hover:bg-gray-200"
+                    >
+                      Download
+                    </a>
+                  )}
+
+                  <button
+                    onClick={() => handleDelete(item)}
+                    disabled={deletingId === item.id}
+                    className="rounded-lg bg-red-100 px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-200 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {getPlanText(item)}
-                  </div>
+                    {deletingId === item.id ? "Deleting..." : "Delete"}
+                  </button>
                 </div>
-              ) : (
-                <div
-                  style={{
-                    padding: 20,
-                    borderRadius: 8,
-                    background: "rgba(0,0,0,0.05)",
-                    textAlign: "center",
-                    fontSize: 14,
-                    opacity: 0.7,
-                  }}
-                >
-                  Unsupported or missing media
-                </div>
-              )}
+              </div>
             </div>
           ))}
         </div>
