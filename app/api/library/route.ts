@@ -8,6 +8,7 @@ export async function GET() {
         .from("media")
         .select("*")
         .order("created_at", { ascending: false }),
+
       supabaseAdmin
         .from("plans")
         .select("*")
@@ -28,28 +29,27 @@ export async function GET() {
       );
     }
 
-    const media = (mediaResult.data ?? []).map((item) => ({
-      ...item,
-      item_kind: "media",
-    }));
+    const mediaItems =
+      mediaResult.data?.map((m) => ({
+        ...m,
+        item_kind: "media",
+      })) ?? [];
 
-    const plans = (plansResult.data ?? []).map((item) => ({
-      ...item,
-      item_kind: "plan",
-      type: "plan",
-      url: null,
-      storage_path: null,
-    }));
+    const planItems =
+      plansResult.data?.map((p) => ({
+        ...p,
+        type: "plan",
+        item_kind: "plan",
+      })) ?? [];
 
-    const items = [...media, ...plans].sort((a: any, b: any) => {
-      const aTime = new Date(a.created_at ?? 0).getTime();
-      const bTime = new Date(b.created_at ?? 0).getTime();
-      return bTime - aTime;
-    });
+    const items = [...mediaItems, ...planItems].sort(
+      (a: any, b: any) =>
+        new Date(b.created_at).getTime() -
+        new Date(a.created_at).getTime()
+    );
 
-    return NextResponse.json({
-      items,
-    });
+    return NextResponse.json({ items });
+
   } catch (error: any) {
     return NextResponse.json(
       { error: error?.message || "Failed to load library." },
