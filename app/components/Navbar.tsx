@@ -1,30 +1,26 @@
 "use client";
 
-import { useRouter, usePathname } from "next/navigation";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
+const links = [
+  { href: "/dashboard", label: "Plan" },
+  { href: "/tools/image-maker", label: "Image" },
+  { href: "/tools/video-maker", label: "Video" },
+  { href: "/tools/image-to-video", label: "Image→Video" },
+  { href: "/tools/audio-to-video", label: "Audio→Video" },
+  { href: "/tools/library", label: "Library" },
+];
+
 export default function Navbar() {
-  const router = useRouter();
   const pathname = usePathname();
+  const router = useRouter();
 
   async function handleSignOut() {
     await supabase.auth.signOut();
     router.push("/");
-  }
-
-  function getLinkStyle(active: boolean): React.CSSProperties {
-    return {
-      letterSpacing: "0.3px",
-      padding: "6px 10px",
-      borderRadius: 8,
-      cursor: "pointer",
-      fontSize: 14,
-      color: "#fff",
-      opacity: active ? 1 : 0.6,
-      background: active ? "rgba(255,255,255,0.18)" : "transparent",
-      transition: "all 0.2s ease",
-      fontWeight: active ? 700 : 500,
-    };
+    router.refresh();
   }
 
   return (
@@ -36,75 +32,73 @@ export default function Navbar() {
         background: "#111",
         color: "#fff",
         borderBottom: "1px solid rgba(255,255,255,0.08)",
-        padding: "12px 20px",
+        padding: "12px 16px",
         display: "flex",
         justifyContent: "space-between",
         alignItems: "center",
-        gap: 16,
+        gap: 12,
       }}
     >
       <div
         style={{
-          fontWeight: 700,
-          cursor: "pointer",
-          color: "#fff",
-        }}
-        onClick={() => router.push("/")}
-      >
-        Zenavant
-      </div>
-
-      <div
-        style={{
           display: "flex",
+          alignItems: "center",
           gap: 10,
           flexWrap: "wrap",
-          alignItems: "center",
         }}
       >
-        <div
-          style={getLinkStyle(pathname === "/tools/turn-thought-into-plan")}
-          onClick={() => router.push("/tools/turn-thought-into-plan")}
-        >
-          Plan
-        </div>
-
-        <div
-          style={getLinkStyle(pathname === "/tools/image-maker")}
-          onClick={() => router.push("/tools/image-maker")}
-        >
-          Image
-        </div>
-
-        <div
-          style={getLinkStyle(pathname === "/tools/video-maker")}
-          onClick={() => router.push("/tools/video-maker")}
-        >
-          Video
-        </div>
-
-        <div
-          style={getLinkStyle(pathname === "/tools/library")}
-          onClick={() => router.push("/tools/library")}
-        >
-          Library
-        </div>
-
-        <button
-          onClick={handleSignOut}
+        <Link
+          href="/dashboard"
           style={{
-            background: "#fff",
-            color: "#111",
-            borderRadius: 8,
-            padding: "8px 12px",
-            fontWeight: 600,
-            border: "none",
-            cursor: "pointer",
+            color: "#fff",
+            textDecoration: "none",
+            fontWeight: 700,
+            marginRight: 8,
           }}
         >
-          Sign out
-        </button>
+          Zenavant
+        </Link>
+
+        {links.map((link) => {
+          const active = pathname === link.href;
+          return (
+            <Link
+              key={link.href}
+              href={link.href}
+              style={{
+                color: "#fff",
+                textDecoration: "none",
+                padding: "8px 12px",
+                borderRadius: 10,
+                background: active ? "rgba(255,255,255,0.18)" : "transparent",
+                transition: "all 0.2s ease",
+                fontWeight: active ? 700 : 500,
+                fontSize: 15,
+              }}
+            >
+              {link.label}
+            </Link>
+          );
+        })}
       </div>
+
+      <button
+        onClick={handleSignOut}
+        style={{
+          padding: "10px 14px",
+          fontSize: 16,
+          borderRadius: 12,
+          border: "1px solid rgba(255,255,255,0.2)",
+          background: "#fff",
+          color: "#111",
+          cursor: "pointer",
+          fontWeight: 600,
+          whiteSpace: "nowrap",
+        }}
+      >
+        Sign out
+      </button>
     </div>
   );
 }
+

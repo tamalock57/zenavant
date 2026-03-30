@@ -2,11 +2,25 @@
 
 import { useEffect, useRef, useState } from "react";
 
-export default function Page() {
+const SIZE_OPTIONS = [
+  { value: "1280x720", label: "1280x720 (Landscape)" },
+  { value: "720x1280", label: "720x1280 (Portrait)" },
+  { value: "1792x1024", label: "1792x1024 (Wide HD)" },
+  { value: "1024x1792", label: "1024x1792 (Tall HD)" },
+];
+
+const SECOND_OPTIONS = ["4", "8", "12"];
+
+export default function ImageToVideoPage() {
   const handled = useRef(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
   const [file, setFile] = useState<File | null>(null);
   const [prompt, setPrompt] = useState("");
+  const [seconds, setSeconds] = useState("8");
+  const [size, setSize] = useState("1280x720");
+  const [model, setModel] = useState("sora-2");
+
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -65,6 +79,9 @@ export default function Page() {
 
       if (file) fd.append("file", file);
       fd.append("prompt", prompt);
+      fd.append("seconds", seconds);
+      fd.append("size", size);
+      fd.append("model", model);
 
       const res = await fetch("/api/image-to-video", {
         method: "POST",
@@ -88,7 +105,7 @@ export default function Page() {
   }
 
   return (
-    <main style={{ maxWidth: 700, margin: "auto", padding: 24 }}>
+    <main style={{ maxWidth: 760, margin: "0 auto", padding: 24 }}>
       <h1 style={{ fontSize: 34, fontWeight: 750, marginBottom: 6 }}>
         Image → Video
       </h1>
@@ -110,11 +127,37 @@ export default function Page() {
           <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
             Upload Image
           </label>
+
+          <label
+            htmlFor="image-upload"
+            style={{
+              display: "inline-block",
+              padding: "10px 14px",
+              borderRadius: 10,
+              border: "1px solid rgba(0,0,0,0.2)",
+              background: "#fff",
+              cursor: "pointer",
+              fontWeight: 600,
+            }}
+          >
+            Choose File
+          </label>
+
           <input
+            id="image-upload"
+            ref={fileRef}
             type="file"
             accept="image/*"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            style={{ display: "none" }}
+            onChange={(e) => {
+              const nextFile = e.target.files?.[0] ?? null;
+              setFile(nextFile);
+            }}
           />
+
+          <div style={{ marginTop: 8, fontSize: 14, opacity: 0.8 }}>
+            {file?.name || "No file chosen"}
+          </div>
         </div>
 
         <div style={{ marginTop: 12 }}>
@@ -135,6 +178,81 @@ export default function Page() {
               boxSizing: "border-box",
             }}
           />
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            gap: 12,
+            flexWrap: "wrap",
+            marginTop: 12,
+            alignItems: "end",
+          }}
+        >
+          <div>
+            <label style={{ display: "block", fontSize: 14, marginBottom: 6, opacity: 0.85 }}>
+              Model
+            </label>
+            <select
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              style={{
+                padding: "10px 12px",
+                fontSize: 16,
+                borderRadius: 10,
+                border: "1px solid rgba(0,0,0,0.2)",
+                background: "#fff",
+              }}
+            >
+              <option value="sora-2">sora-2</option>
+            </select>
+          </div>
+
+          <div>
+            <label style={{ display: "block", fontSize: 14, marginBottom: 6, opacity: 0.85 }}>
+              Video Length
+            </label>
+            <select
+              value={seconds}
+              onChange={(e) => setSeconds(e.target.value)}
+              style={{
+                padding: "10px 12px",
+                fontSize: 16,
+                borderRadius: 10,
+                border: "1px solid rgba(0,0,0,0.2)",
+                background: "#fff",
+              }}
+            >
+              {SECOND_OPTIONS.map((s) => (
+                <option key={s} value={s}>
+                  {s} seconds
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label style={{ display: "block", fontSize: 14, marginBottom: 6, opacity: 0.85 }}>
+              Size
+            </label>
+            <select
+              value={size}
+              onChange={(e) => setSize(e.target.value)}
+              style={{
+                padding: "10px 12px",
+                fontSize: 16,
+                borderRadius: 10,
+                border: "1px solid rgba(0,0,0,0.2)",
+                background: "#fff",
+              }}
+            >
+              {SIZE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <button

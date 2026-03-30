@@ -10,7 +10,7 @@ type MediaItem = {
   prompt?: string | null;
 };
 
-export default function Page() {
+export default function LibraryPage() {
   const [media, setMedia] = useState<MediaItem[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
 
@@ -20,7 +20,23 @@ export default function Page() {
     });
 
     const data = await res.json();
-    setMedia(Array.isArray(data) ? data : []);
+
+    if (Array.isArray(data)) {
+      setMedia(data);
+      return;
+    }
+
+    if (Array.isArray(data?.items)) {
+      setMedia(data.items);
+      return;
+    }
+
+    if (Array.isArray(data?.media)) {
+      setMedia(data.media);
+      return;
+    }
+
+    setMedia([]);
   }
 
   useEffect(() => {
@@ -121,15 +137,17 @@ export default function Page() {
         </button>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: 12,
-        }}
-      >
-        {Array.isArray(media) &&
-          media.map((m) => (
+      {media.length === 0 ? (
+        <div style={{ opacity: 0.7 }}>No generations yet.</div>
+      ) : (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: 12,
+          }}
+        >
+          {media.map((m) => (
             <div
               key={m.id}
               style={{
@@ -168,7 +186,8 @@ export default function Page() {
               )}
             </div>
           ))}
-      </div>
+        </div>
+      )}
     </main>
   );
 }
