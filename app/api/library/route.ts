@@ -8,7 +8,6 @@ export async function GET() {
         .from("media")
         .select("*")
         .order("created_at", { ascending: false }),
-
       supabaseAdmin
         .from("plans")
         .select("*")
@@ -29,9 +28,27 @@ export async function GET() {
       );
     }
 
+    const media = (mediaResult.data ?? []).map((item) => ({
+      ...item,
+      item_kind: "media",
+    }));
+
+    const plans = (plansResult.data ?? []).map((item) => ({
+      ...item,
+      item_kind: "plan",
+      type: "plan",
+      url: null,
+      storage_path: null,
+    }));
+
+    const items = [...media, ...plans].sort((a: any, b: any) => {
+      const aTime = new Date(a.created_at ?? 0).getTime();
+      const bTime = new Date(b.created_at ?? 0).getTime();
+      return bTime - aTime;
+    });
+
     return NextResponse.json({
-      media: mediaResult.data ?? [],
-      plans: plansResult.data ?? [],
+      items,
     });
   } catch (error: any) {
     return NextResponse.json(
