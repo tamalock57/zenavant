@@ -58,14 +58,14 @@ export default function LibraryPage() {
     }
 
     setSelected([]);
-    load();
+    await load();
   }
 
   return (
     <main style={{ padding: 24, maxWidth: 1100, margin: "0 auto" }}>
       <h1>Library</h1>
 
-      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
         <button onClick={selectAll}>Select All</button>
         <button onClick={deselectAll}>Deselect</button>
         <button onClick={deleteSelected} disabled={selected.length === 0}>
@@ -104,26 +104,19 @@ export default function LibraryPage() {
                 <span style={{ marginLeft: 6 }}>Select</span>
               </div>
 
-              {/* VIDEO */}
-              {item.type === "video" && item.url && (
+              {item.type === "video" && item.url ? (
                 <video
                   src={item.url}
                   controls
                   style={{ width: "100%", borderRadius: 8 }}
                 />
-              )}
-
-              {/* IMAGE */}
-              {item.type === "image" && item.url && (
+              ) : item.type === "image" && item.url ? (
                 <img
                   src={item.url}
                   alt="Library item"
                   style={{ width: "100%", borderRadius: 8 }}
                 />
-              )}
-
-              {/* PLAN */}
-              {item.type === "plan" && (
+              ) : item.type === "plan" ? (
                 <div
                   style={{
                     padding: 12,
@@ -136,6 +129,19 @@ export default function LibraryPage() {
                   <div style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>
                     {item.prompt || "No content"}
                   </div>
+                </div>
+              ) : (
+                <div
+                  style={{
+                    padding: 20,
+                    borderRadius: 8,
+                    background: "rgba(0,0,0,0.05)",
+                    textAlign: "center",
+                    fontSize: 14,
+                    opacity: 0.7,
+                  }}
+                >
+                  Unsupported or missing media
                 </div>
               )}
             </div>
