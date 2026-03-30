@@ -43,7 +43,10 @@ export async function POST(req: Request) {
     });
   } catch (err: any) {
     console.error("POST image-to-video error:", err);
-    return Response.json({ error: err?.message }, { status: 500 });
+    return Response.json(
+      { error: err?.message ?? "Image-to-video failed" },
+      { status: 500 }
+    );
   }
 }
 
@@ -54,6 +57,14 @@ export async function GET(req: Request) {
 
     const job = await openai.videos.retrieve(id);
 
+    if (job.status === "failed") {
+      return Response.json({
+        status: "failed",
+        progress: job.progress ?? 0,
+        error: job.error?.message ?? "Image-to-video failed",
+      });
+    }
+
     if (job.status !== "completed") {
       return Response.json({
         status: job.status,
@@ -63,18 +74,29 @@ export async function GET(req: Request) {
 
     const storagePath = `videos/image-to-video-${id}.mp4`;
 
-    // ✅ CHECK EXISTING FIRST
-    const { data: existing } = await supabaseAdmin
+    // Check existing DB row first
+    const { data: existingRow, error: existingError } = await supabaseAdmin
       .from("media")
-      .select("url")
+      .select("id, url, storage_path")
+      .eq("type", "video")
       .eq("storage_path", storagePath)
       .maybeSingle();
 
-    if (existing?.url) {
+    if (existingError) {
+      return Response.json(
+        {
+          error: "Failed to check existing video",
+          details: existingError.message,
+        },
+        { status: 500 }
+      );
+    }
+
+    if (existingRow?.url) {
       return Response.json({
         status: "completed",
         progress: 100,
-        downloadUrl: existing.url,
+        downloadUrl: existingRow.url,
       });
     }
 
@@ -87,9 +109,20 @@ export async function GET(req: Request) {
       }
     );
 
+    if (!contentRes.ok) {
+      const text = await contentRes.text().catch(() => "");
+      return Response.json(
+        {
+          error: "Failed to download video content",
+          details: text,
+        },
+        { status: 500 }
+      );
+    }
+
     const buf = await contentRes.arrayBuffer();
 
-    await supabaseAdmin.storage.from("media").upload(
+    const upload = await supabaseAdmin.storage.from("media").upload(
       storagePath,
       toBytes(buf),
       {
@@ -98,18 +131,45 @@ export async function GET(req: Request) {
       }
     );
 
+    if (upload.error) {
+      return Response.json(
+        {
+          error: "Supabase upload failed",
+          details: upload.error.message,
+        },
+        { status: 500 }
+      );
+    }
+
     const { data } = supabaseAdmin.storage
       .from("media")
       .getPublicUrl(storagePath);
 
     const url = data.publicUrl;
 
-    await supabaseAdmin.from("media").insert({
+    if (!url) {
+      return Response.json(
+        { error: "Failed to get public URL" },
+        { status: 500 }
+      );
+    }
+
+    const { error: insertError } = await supabaseAdmin.from("media").insert({
       type: "video",
       prompt: job.prompt ?? "",
       url,
       storage_path: storagePath,
     });
+
+    if (insertError) {
+      return Response.json(
+        {
+          error: "DB insert failed",
+          details: insertError.message,
+        },
+        { status: 500 }
+      );
+    }
 
     return Response.json({
       status: "completed",
@@ -118,6 +178,9 @@ export async function GET(req: Request) {
     });
   } catch (err: any) {
     console.error("GET image-to-video error:", err);
-    return Response.json({ error: err?.message }, { status: 500 });
+    return Response.json(
+      { error: err?.message ?? "Image-to-video status failed" },
+      { status: 500 }
+    );
   }
 }
