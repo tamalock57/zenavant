@@ -37,30 +37,34 @@ export default function Navbar() {
         justifyContent: "space-between",
         alignItems: "center",
         gap: 12,
+        flexWrap: "wrap",
       }}
     >
+      {/* LOGO */}
+      <Link
+        href="/dashboard"
+        style={{
+          color: "#fff",
+          textDecoration: "none",
+          fontWeight: 700,
+          fontSize: 18,
+        }}
+      >
+        Zenavant
+      </Link>
+
+      {/* NAV LINKS */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 10,
+          gap: 8,
           flexWrap: "wrap",
         }}
       >
-        <Link
-          href="/dashboard"
-          style={{
-            color: "#fff",
-            textDecoration: "none",
-            fontWeight: 700,
-            marginRight: 8,
-          }}
-        >
-          Zenavant
-        </Link>
-
         {links.map((link) => {
           const active = pathname === link.href;
+
           return (
             <Link
               key={link.href}
@@ -70,7 +74,9 @@ export default function Navbar() {
                 textDecoration: "none",
                 padding: "8px 12px",
                 borderRadius: 10,
-                background: active ? "rgba(255,255,255,0.18)" : "transparent",
+                background: active
+                  ? "rgba(255,255,255,0.18)"
+                  : "transparent",
                 transition: "all 0.2s ease",
                 fontWeight: active ? 700 : 500,
                 fontSize: 15,
@@ -80,25 +86,25 @@ export default function Navbar() {
             </Link>
           );
         })}
-      </div>
 
-      <button
-        onClick={handleSignOut}
-        style={{
-          padding: "10px 14px",
-          fontSize: 16,
-          borderRadius: 12,
-          border: "1px solid rgba(255,255,255,0.2)",
-          background: "#fff",
-          color: "#111",
-          cursor: "pointer",
-          fontWeight: 600,
-          whiteSpace: "nowrap",
-        }}
-      >
-        Sign out
-      </button>
+        {/* SIGN OUT */}
+        <button
+          onClick={handleSignOut}
+          style={{
+            padding: "10px 14px",
+            fontSize: 16,
+            borderRadius: 12,
+            border: "1px solid rgba(255,255,255,0.2)",
+            background: "#fff",
+            color: "#111",
+            cursor: "pointer",
+            fontWeight: 600,
+            whiteSpace: "nowrap",
+          }}
+        >
+          Sign out
+        </button>
+      </div>
     </div>
   );
 }
-
