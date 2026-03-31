@@ -1,198 +1,235 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
 type Project = {
   id: string;
   title: string;
-  created_at: string;
+  description?: string | null;
+  created_at?: string | null;
 };
+
+function formatDate(value?: string | null) {
+  if (!value) return "Unknown date";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown date";
+
+  return date.toLocaleString();
+}
 
 export default function DashboardPage() {
-  const [session, setSession] = useState<any>(null);
-  const [loadingSession, setLoadingSession] = useState(true);
-
-  const [projectTitle, setProjectTitle] = useState("");
   const [projects, setProjects] = useState<Project[]>([]);
-  const [message, setMessage] = useState("");
-  const [loadingProjects, setLoadingProjects] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // 1) Get session + stay updated (prevents weird “refresh does nothing” cases)
+  async function loadProjects(showSpinner = true) {
+    try {
+      if (showSpinner) setLoading(true);
+      setError(null);
+
+      const { data, error } = await supabase
+        .from("projects")
+        .select("id, title, description, created_at")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      setProjects(data ?? []);
+    } catch (err) {
+      console.error("Dashboard load failed:", err);
+      setError("Could not load projects.");
+    } finally {
+      if (showSpinner) setLoading(false);
+      setRefreshing(false);
+    }
+  }
+
+  async function handleRefresh() {
+    try {
+      setRefreshing(true);
+      await loadProjects(false);
+    } catch (err) {
+      console.error(err);
+      setRefreshing(false);
+    }
+  }
+
+  async function handleCreateProject(e: React.FormEvent) {
+    e.preventDefault();
+
+    if (!title.trim()) {
+      alert("Please enter a project title.");
+      return;
+    }
+
+    try {
+      setCreating(true);
+
+      const payload = {
+        title: title.trim(),
+        description: description.trim() || null,
+      };
+
+      const { data, error } = await supabase
+        .from("projects")
+        .insert([payload])
+        .select("id, title, description, created_at")
+        .single();
+
+      if (error) throw error;
+
+      setProjects((prev) => [data, ...prev]);
+      setTitle("");
+      setDescription("");
+    } catch (err) {
+      console.error("Create project failed:", err);
+      alert("Could not create project.");
+    } finally {
+      setCreating(false);
+    }
+  }
+
   useEffect(() => {
-    let mounted = true;
-
-    const init = async () => {
-      const { data } = await supabase.auth.getSession();
-      if (!mounted) return;
-      setSession(data.session);
-      setLoadingSession(false);
-    };
-
-    init();
-
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      setSession(newSession);
-    });
-
-    return () => {
-      mounted = false;
-      sub.subscription.unsubscribe();
-    };
+    loadProjects(true);
   }, []);
 
-  // 2) Load projects whenever session becomes available
-  useEffect(() => {
-    if (session?.user?.id) {
-      loadProjects();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.user?.id]);
-
-  const loadProjects = async () => {
-    setMessage("");
-    if (!session?.user?.id) {
-      setMessage("No session yet. Try reloading the page.");
-      return;
-    }
-
-    setLoadingProjects(true);
-
-    const { data, error } = await supabase
-      .from("projects")
-      .select("id, title, created_at")
-      .eq("owner_id", session.user.id)
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      setMessage(`Load error: ${error.message}`);
-      setLoadingProjects(false);
-      return;
-    }
-
-    setProjects((data as Project[]) ?? []);
-    setLastUpdated(Date.now());
-    setLoadingProjects(false);
-  };
-
-  const createProject = async () => {
-  setMessage("");
-
-  const title = projectTitle.trim();
-  if (!title) {
-    setMessage("Please enter a project title.");
-    return;
-  }
-
-  const { data: userData, error: userErr } = await supabase.auth.getUser();
-  const user = userData?.user;
-
-  if (userErr || !user) {
-    setMessage("Not signed in.");
-    return;
-  }
-
-  const { error } = await supabase.from("projects").insert({
-    title,
-    owner_id: user.id,
-  });
-
-  if (error) {
-    setMessage(error.message);
-    return;
-  }
-
-  // ✅ clear ONLY after success
-  setProjectTitle("");
-
-  // refresh list (optional await)
-  await loadProjects();
-};
-
-
-  const signOut = async () => {
-    await supabase.auth.signOut();
-    window.location.href = "/";
-  };
-
-  if (loadingSession) return <div className="p-8">Loading session…</div>;
-  if (!session) return <div className="p-8">Not signed in.</div>;
-
   return (
-    <main className="min-h-screen flex flex-col items-center px-6 py-10">
-      <div className="w-full max-w-2xl space-y-6">
-        <div className="text-center space-y-1">
-          <h1 className="text-3xl font-semibold">Dashboard</h1>
-          <p className="text-neutral-600 text-sm">Signed in as {session.user.email}</p>
-          {lastUpdated && (
-            <p className="text-xs text-neutral-500">
-              Last refreshed: {new Date(lastUpdated).toLocaleString()}
-            </p>
-          )}
+    <main className="mx-auto max-w-6xl px-4 py-8">
+      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
+          <p className="mt-2 text-sm text-gray-600">
+            Create projects and keep your workflow organized.
+          </p>
         </div>
 
-        {/* Create Project */}
-        <div className="border rounded p-6 space-y-3">
-          <h2 className="font-medium">Create a project</h2>
+        <button
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {refreshing ? "Refreshing..." : "Refresh"}
+        </button>
+      </div>
 
-          <input
-           value={projectTitle}
-           onChange={(e) => setProjectTitle(e.target.value)}
-           className="w-full rounded border px-3 py-2"
-           placeholder="Project title"
-         />
+      <div className="grid gap-8 lg:grid-cols-[1.1fr,1.4fr]">
+        <section className="rounded-2xl border bg-white p-6 shadow-sm">
+          <h2 className="text-xl font-semibold">Create a Project</h2>
+          <p className="mt-2 text-sm text-gray-600">
+            Start something new and keep your ideas organized.
+          </p>
 
+          <form onSubmit={handleCreateProject} className="mt-6 space-y-4">
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-800">
+                Project Title
+              </label>
+              <input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Enter project title"
+                className="w-full rounded-lg border px-4 py-3 text-sm outline-none focus:border-black"
+              />
+            </div>
 
-          <button
-            className="rounded bg-black text-white px-4 py-2"
-            onClick={createProject}
-          >
-            Create
-          </button>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-800">
+                Description
+              </label>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Add a short description"
+                rows={4}
+                className="w-full rounded-lg border px-4 py-3 text-sm outline-none focus:border-black"
+              />
+            </div>
 
-          {message && <p className="text-sm text-red-600">{message}</p>}
-        </div>
-
-        {/* Project List */}
-        <div className="border rounded p-6 space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="font-medium">Your projects</h2>
             <button
-              className="text-sm underline"
-              onClick={loadProjects}
-              disabled={loadingProjects}
+              type="submit"
+              disabled={creating}
+              className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {loadingProjects ? "Refreshing…" : "Refresh"}
+              {creating ? "Creating..." : "Create Project"}
             </button>
+          </form>
+        </section>
+
+        <section className="rounded-2xl border bg-white p-6 shadow-sm">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-xl font-semibold">Projects</h2>
+            <span className="text-sm text-gray-500">
+              {projects.length} total
+            </span>
           </div>
 
-          {projects.length === 0 ? (
-            <p className="text-sm text-neutral-600">
-              {loadingProjects ? "Loading…" : "No projects yet."}
-            </p>
+          {loading ? (
+            <div className="text-sm text-gray-600">Loading projects...</div>
+          ) : error ? (
+            <div className="text-sm text-red-700">{error}</div>
+          ) : projects.length === 0 ? (
+            <div className="rounded-xl bg-gray-50 p-4 text-sm text-gray-600">
+              No projects yet.
+            </div>
           ) : (
-            <div className="space-y-2">
-              {projects.map((p) => (
-                <div key={p.id} className="border rounded p-3 text-sm">
-                  <a className="font-medium underline" href={`/projects/${p.id}`}>
-              {p.title}
-            </a>
+            <div className="space-y-4">
+              {projects.map((project) => (
+                <div
+                  key={project.id}
+                  className="rounded-xl border p-4 transition hover:bg-gray-50"
+                >
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h3 className="text-base font-semibold text-gray-900">
+                        {project.title}
+                      </h3>
+                      <p className="mt-1 text-sm text-gray-600">
+                        {project.description || "No description."}
+                      </p>
+                      <p className="mt-2 text-xs text-gray-500">
+                        {formatDate(project.created_at)}
+                      </p>
+                    </div>
 
-                  <div className="text-neutral-500 text-xs">
-                    {new Date(p.created_at).toLocaleString()}
+                    <div className="flex flex-wrap gap-2">
+                      <Link
+                        href="/tools/image-maker"
+                        className="rounded-lg bg-gray-100 px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-200"
+                      >
+                        Image
+                      </Link>
+                      <Link
+                        href="/tools/video-maker"
+                        className="rounded-lg bg-gray-100 px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-200"
+                      >
+                        Video
+                      </Link>
+                      <Link
+                        href="/tools/turn-thought-into-plan"
+                        className="rounded-lg bg-black px-3 py-2 text-sm font-medium text-white hover:opacity-90"
+                      >
+                        Plan
+                      </Link>
+                      <Link
+                        href="/tools/library"
+                        className="rounded-lg bg-gray-100 px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-200"
+                      >
+                        Library
+                      </Link>
+                    </div>
                   </div>
                 </div>
               ))}
             </div>
           )}
-        </div>
-
-        <div className="text-center">
-          <button className="text-sm underline text-neutral-600" onClick={signOut}>
-            Sign out
-          </button>
-        </div>
+        </section>
       </div>
     </main>
   );
