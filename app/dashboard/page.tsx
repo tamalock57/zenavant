@@ -5,9 +5,10 @@ import { supabase } from "@/lib/supabaseClient";
 
 type Project = {
   id: string;
-  name: string;
-  description?: string | null;
-  created_at?: string | null;
+  name: string | null;
+  description: string | null;
+  created_at: string | null;
+  status?: string | null;
 };
 
 function formatDate(value?: string | null) {
@@ -22,9 +23,10 @@ export default function DashboardPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastRefreshed, setLastRefreshed] = useState<string>("");
 
   async function loadProjects(showLoading = true) {
     try {
@@ -33,12 +35,13 @@ export default function DashboardPage() {
 
       const { data, error } = await supabase
         .from("projects")
-        .select("id, name, description, created_at")
+        .select("id, name, description, created_at, status")
         .order("created_at", { ascending: false });
 
       if (error) throw error;
 
       setProjects(data ?? []);
+      setLastRefreshed(new Date().toLocaleString());
     } catch (err) {
       console.error("Dashboard load failed:", err);
       setError("Could not load projects.");
@@ -50,7 +53,7 @@ export default function DashboardPage() {
 
   async function handleRefresh() {
     setRefreshing(true);
-    await loadProjects(true);
+    await loadProjects(false);
   }
 
   async function handleCreateProject(e: React.FormEvent) {
@@ -73,7 +76,7 @@ export default function DashboardPage() {
             status: "active",
           },
         ])
-        .select("id, name, description, created_at")
+        .select("id, name, description, created_at, status")
         .single();
 
       if (error) throw error;
@@ -81,6 +84,7 @@ export default function DashboardPage() {
       setProjects((prev) => [data, ...prev]);
       setName("");
       setDescription("");
+      setLastRefreshed(new Date().toLocaleString());
     } catch (err) {
       console.error("Create project failed:", err);
       alert("Could not create project.");
@@ -95,22 +99,25 @@ export default function DashboardPage() {
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="mt-2 text-sm text-gray-600">
+      <div className="mb-8 text-center">
+        <h1 className="text-4xl font-semibold tracking-tight">Dashboard</h1>
+        <p className="mt-3 text-base text-gray-600">
           Create projects and keep your workflow organized.
         </p>
+        {lastRefreshed && (
+          <p className="mt-2 text-sm text-gray-500">Last refreshed: {lastRefreshed}</p>
+        )}
       </div>
 
       <button
         onClick={handleRefresh}
         disabled={refreshing}
-        className="mb-8 w-full rounded-lg bg-black px-4 py-3 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+        className="mb-10 w-full rounded-lg bg-black px-4 py-3 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {refreshing ? "Refreshing..." : "Refresh"}
       </button>
 
-      <div className="grid gap-8">
+      <div className="grid gap-10">
         <section className="rounded-2xl border bg-white p-8 shadow-sm">
           <h2 className="text-2xl font-semibold">Create a Project</h2>
           <p className="mt-2 text-sm text-gray-600">
@@ -164,7 +171,9 @@ export default function DashboardPage() {
           ) : error ? (
             <div className="text-sm text-red-700">{error}</div>
           ) : projects.length === 0 ? (
-            <div className="text-sm text-gray-600">No projects yet.</div>
+            <div className="rounded-xl border p-4 text-sm text-gray-600">
+              No projects yet.
+            </div>
           ) : (
             <div className="space-y-4">
               {projects.map((project) => (
