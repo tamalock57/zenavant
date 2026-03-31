@@ -105,7 +105,9 @@ export default function DashboardPage() {
           Create projects and keep your workflow organized.
         </p>
         {lastRefreshed && (
-          <p className="mt-2 text-sm text-gray-500">Last refreshed: {lastRefreshed}</p>
+          <p className="mt-2 text-sm text-gray-500">
+            Last refreshed: {lastRefreshed}
+          </p>
         )}
       </div>
 
