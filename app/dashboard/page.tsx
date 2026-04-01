@@ -1,26 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
-
-const router = useRouter();
-
-useEffect(() => {
-  async function checkUser() {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
-      router.push("/");
-    }
-  }
-
-  checkUser();
-}, [router]);
-
 
 const tools = [
   {
@@ -50,6 +33,23 @@ const tools = [
 ];
 
 export default function DashboardPage() {
+  const router = useRouter();
+
+  // ✅ PROTECT DASHBOARD
+  useEffect(() => {
+    async function checkUser() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        router.push("/");
+      }
+    }
+
+    checkUser();
+  }, [router]);
+
   return (
     <main className="mx-auto max-w-5xl px-4 py-8">
       <div className="mb-8 text-center">

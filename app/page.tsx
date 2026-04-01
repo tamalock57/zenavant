@@ -4,7 +4,6 @@ import { FormEvent, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
-
 export default function HomePage() {
   const router = useRouter();
 
@@ -15,7 +14,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-   // 👇 ✅ PUT IT RIGHT HERE
+  // ✅ AUTO REDIRECT IF ALREADY LOGGED IN
   useEffect(() => {
     async function checkSession() {
       const {
@@ -29,8 +28,6 @@ export default function HomePage() {
 
     checkSession();
   }, [router]);
-
-  // other functions like handleSubmit...
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -122,7 +119,7 @@ export default function HomePage() {
               <input
                 type="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => setEmail(e.target.value)} // ✅ FIXED
                 placeholder="Enter your email"
                 autoComplete="email"
                 className="w-full rounded-2xl border px-4 py-3 text-sm outline-none focus:border-black"
@@ -133,12 +130,11 @@ export default function HomePage() {
               <label className="mb-2 block text-sm font-medium text-gray-800">
                 Password
               </label>
-
               <div className="flex items-center gap-2 rounded-2xl border px-3">
                 <input
                   type={showPassword ? "text" : "password"}
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => setPassword(e.target.value)} // ✅ FIXED
                   placeholder="Enter your password"
                   autoComplete={
                     mode === "signin" ? "current-password" : "new-password"
