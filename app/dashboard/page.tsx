@@ -35,6 +35,12 @@ const tools = [
 export default function DashboardPage() {
   const router = useRouter();
 
+  // ✅ LOGOUT FUNCTION (button uses this)
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    router.push("/");
+  }
+
   // ✅ PROTECT DASHBOARD
   useEffect(() => {
     async function checkUser() {
@@ -52,11 +58,22 @@ export default function DashboardPage() {
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-8">
-      <div className="mb-8 text-center">
-        <h1 className="text-4xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="mt-3 text-base text-gray-600">
-          Choose a tool and start creating.
-        </p>
+      <div className="mb-8 flex items-center justify-between">
+        <div>
+          <h1 className="text-4xl font-semibold tracking-tight">
+            Dashboard
+          </h1>
+          <p className="mt-3 text-base text-gray-600">
+            Choose a tool and start creating.
+          </p>
+        </div>
+
+        <button
+          onClick={handleLogout}
+          className="rounded-2xl border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
+        >
+          Log out
+        </button>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
