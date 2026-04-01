@@ -1,6 +1,26 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
+
+const router = useRouter();
+
+useEffect(() => {
+  async function checkUser() {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session) {
+      router.push("/");
+    }
+  }
+
+  checkUser();
+}, [router]);
+
 
 const tools = [
   {

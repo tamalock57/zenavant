@@ -1,8 +1,9 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+
 
 export default function HomePage() {
   const router = useRouter();
@@ -13,6 +14,23 @@ export default function HomePage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+   // 👇 ✅ PUT IT RIGHT HERE
+  useEffect(() => {
+    async function checkSession() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (session) {
+        router.push("/dashboard");
+      }
+    }
+
+    checkSession();
+  }, [router]);
+
+  // other functions like handleSubmit...
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
