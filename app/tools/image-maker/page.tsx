@@ -1,8 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
 
 export default function ImageMakerPage() {
+  const router = useRouter();
+
   const [prompt, setPrompt] = useState("");
   const [size, setSize] = useState("1024x1024");
   const [loading, setLoading] = useState(false);
@@ -11,9 +15,24 @@ export default function ImageMakerPage() {
 
   const canSubmit = prompt.trim().length >= 5;
 
+  // Protect page
+  useEffect(() => {
+    async function checkUser() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        router.push("/");
+      }
+    }
+
+    checkUser();
+  }, [router]);
+
+  // Restore prompt passed from another page
   useEffect(() => {
     const saved = localStorage.getItem("zenavant_prompt");
-
     if (saved) {
       setPrompt(saved);
       localStorage.removeItem("zenavant_prompt");
@@ -40,7 +59,7 @@ export default function ImageMakerPage() {
         setError(data?.error || "Request failed");
         return;
       }
-      
+
       console.log("image-maker response:", data);
       setImage(data.imageUrl || data.image || null);
     } catch (e: any) {
@@ -49,6 +68,8 @@ export default function ImageMakerPage() {
       setLoading(false);
     }
   }
+
+  // keep the rest of your existing file below this line
 
   return (
     <main style={{ maxWidth: 760, margin: "0 auto", padding: 24 }}>

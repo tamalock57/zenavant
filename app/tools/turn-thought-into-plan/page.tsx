@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
 
 type Plan = {
   title: string;
@@ -11,12 +13,29 @@ type Plan = {
 };
 
 export default function TurnThoughtIntoPlanPage() {
+  const router = useRouter();
+
   const [thought, setThought] = useState("");
   const [loading, setLoading] = useState(false);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const canSubmit = thought.trim().length >= 5;
+
+  // Protect page
+  useEffect(() => {
+    async function checkUser() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        router.push("/");
+      }
+    }
+
+    checkUser();
+  }, [router]);
 
   async function generate() {
     if (!canSubmit) return;
@@ -48,6 +67,8 @@ export default function TurnThoughtIntoPlanPage() {
     }
   }
 
+  // keep the rest of your existing file below this line
+  
   function buildPlanPrompt() {
     if (!plan) return;
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -27,11 +28,28 @@ function formatDate(value?: string | null) {
 }
 
 export default function LibraryPage() {
+  const router = useRouter();
+
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // Protect page
+  useEffect(() => {
+    async function checkUser() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        router.push("/");
+      }
+    }
+
+    checkUser();
+  }, [router]);
 
   async function loadLibrary(showLoading = true) {
     try {
@@ -112,6 +130,8 @@ export default function LibraryPage() {
       };
     });
   }, [items]);
+
+  // keep the rest of your existing file below this lin
 
   return (
     <main className="max-w-6xl mx-auto px-4 py-8">

@@ -1,10 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
 
 type JobStatus = "queued" | "in_progress" | "completed" | "failed";
 
 export default function VideoMakerPage() {
+  const router = useRouter();
+
   const [prompt, setPrompt] = useState("");
   const [size, setSize] = useState("1280x720");
   const [seconds, setSeconds] = useState("8");
@@ -21,6 +25,22 @@ export default function VideoMakerPage() {
 
   const canSubmit = prompt.trim().length >= 5;
 
+  // Protect page
+  useEffect(() => {
+    async function checkUser() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        router.push("/");
+      }
+    }
+
+    checkUser();
+  }, [router]);
+
+  // Restore prompt passed from another page
   useEffect(() => {
     const saved = localStorage.getItem("zenavant_prompt");
     if (saved) {
@@ -29,6 +49,7 @@ export default function VideoMakerPage() {
     }
   }, []);
 
+  // Cleanup polling on unmount
   useEffect(() => {
     return () => stopPolling();
   }, []);
@@ -39,6 +60,8 @@ export default function VideoMakerPage() {
       pollTimer.current = null;
     }
   }
+
+  // keep the rest of your existing Video Maker code below this line
 
   async function poll(id: string) {
     try {
