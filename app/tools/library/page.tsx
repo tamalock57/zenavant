@@ -36,7 +36,6 @@ export default function LibraryPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // Protect page
   useEffect(() => {
     async function checkUser() {
       const {
@@ -90,6 +89,34 @@ export default function LibraryPage() {
     setSelectedIds([]);
   }
 
+  async function deleteSelected() {
+    if (selectedIds.length === 0) return;
+
+    const confirmed = window.confirm(
+      `Delete ${selectedIds.length} selected item(s)?`
+    );
+    if (!confirmed) return;
+
+    try {
+      const selectedItems = items.filter((item) => selectedIds.includes(item.id));
+
+      const storagePaths = selectedItems
+        .map((item) => item.storage_path)
+        .filter((path): path is string => Boolean(path));
+
+      if (storagePaths.length > 0) {
+        await supabase.storage.from("media").remove(storagePaths);
+      }
+
+      await supabase.from("media").delete().in("id", selectedIds);
+
+      setItems((prev) => prev.filter((item) => !selectedIds.includes(item.id)));
+      setSelectedIds([]);
+    } catch (err) {
+      console.error("Bulk delete failed:", err);
+    }
+  }
+
   async function handleDelete(item: Item) {
     const confirmed = window.confirm("Delete this item?");
     if (!confirmed) return;
@@ -131,11 +158,8 @@ export default function LibraryPage() {
     });
   }, [items]);
 
-  // keep the rest of your existing file below this lin
-
   return (
     <main className="max-w-6xl mx-auto px-4 py-8">
-      {/* HEADER */}
       <div className="mb-6">
         <h1 className="text-3xl font-semibold">Library</h1>
         <p className="text-sm text-gray-600">
@@ -143,31 +167,37 @@ export default function LibraryPage() {
         </p>
       </div>
 
-      {/* ACTION BAR */}
       <div className="flex flex-wrap gap-2 mb-6">
         <button
           onClick={refreshLibrary}
-          className="bg-black text-white px-4 py-2 rounded-lg"
+          className="bg-black text-white px-4 py-2 rounded-xl text-sm"
         >
           {refreshing ? "Refreshing..." : "Refresh"}
         </button>
 
         <button
           onClick={selectAll}
-          className="bg-gray-100 px-3 py-2 rounded-lg text-sm"
+          className="bg-gray-100 text-gray-800 px-4 py-2 rounded-xl text-sm"
         >
           Select All
         </button>
 
         <button
           onClick={deselectAll}
-          className="bg-gray-100 px-3 py-2 rounded-lg text-sm"
+          className="bg-gray-100 text-gray-800 px-4 py-2 rounded-xl text-sm"
         >
           Deselect All
         </button>
+
+        <button
+          onClick={deleteSelected}
+          disabled={selectedIds.length === 0}
+          className="bg-red-100 text-red-700 px-4 py-2 rounded-xl text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Delete Selected ({selectedIds.length})
+        </button>
       </div>
 
-      {/* CONTENT */}
       {loading ? (
         <div>Loading...</div>
       ) : (
@@ -182,25 +212,20 @@ export default function LibraryPage() {
                   selected ? "ring-2 ring-black" : ""
                 }`}
               >
-                {/* SELECT ROW */}
                 <div className="flex justify-between items-center p-3 border-b">
                   <input
                     type="checkbox"
                     checked={selected}
                     onChange={() => toggleSelect(item.id)}
                   />
-
                   <span className="text-xs bg-gray-100 px-2 py-1 rounded">
                     {item.type}
                   </span>
                 </div>
 
-                {/* MEDIA */}
                 <div className="aspect-video bg-gray-100">
                   {item.isPlan ? (
-                    <div className="p-4 text-sm">
-                      {item.prompt || "Saved plan"}
-                    </div>
+                    <div className="p-4 text-sm">{item.prompt || "Saved plan"}</div>
                   ) : item.isVideo ? (
                     item.mediaUrl ? (
                       <video
@@ -221,6 +246,7 @@ export default function LibraryPage() {
                     item.mediaUrl ? (
                       <img
                         src={item.mediaUrl}
+                        alt="Saved media"
                         className="w-full h-full object-cover"
                       />
                     ) : (
@@ -235,7 +261,6 @@ export default function LibraryPage() {
                   )}
                 </div>
 
-                {/* DETAILS */}
                 <div className="p-4">
                   <p className="text-xs text-gray-500 mb-2">
                     {formatDate(item.created_at)}
@@ -250,6 +275,7 @@ export default function LibraryPage() {
                       <a
                         href={item.mediaUrl}
                         target="_blank"
+                        rel="noreferrer"
                         className="bg-gray-100 px-3 py-2 rounded-lg text-sm"
                       >
                         Download
