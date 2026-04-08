@@ -6,7 +6,6 @@ export const runtime = "nodejs";
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-
     const prompt = (body?.prompt ?? "").toString().trim();
     const size = (body?.size ?? "1280x720").toString();
     const seconds = (body?.seconds ?? "4").toString() as "4" | "8" | "12";
@@ -40,7 +39,6 @@ export async function POST(req: Request) {
     });
   } catch (error: any) {
     console.error("VIDEO POST ERROR:", error);
-
     return Response.json(
       {
         error: "Video job creation failed",
@@ -87,10 +85,9 @@ export async function GET(req: Request) {
       });
     }
 
-    // ✅ deterministic path so repeated polls don't create new files
     const storagePath = `videos/${id}.mp4`;
 
-    // ✅ if we've already saved this completed job, return existing URL immediately
+    // 1) Fast path: already saved
     const { data: existingRow, error: existingError } = await supabaseAdmin
       .from("media")
       .select("id, url, storage_path")
@@ -116,18 +113,16 @@ export async function GET(req: Request) {
       });
     }
 
-    const contentRes = await fetch(
-      `https://api.openai.com/v1/videos/${id}/content`,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        },
-      }
-    );
+    // 2) Download completed video content from OpenAI
+    const contentRes = await fetch(`https://api.openai.com/v1/videos/${id}/content`, {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      cache: "no-store",
+    });
 
     if (!contentRes.ok) {
       const text = await contentRes.text();
-
       return Response.json(
         {
           error: "Failed to download video content",
@@ -140,6 +135,7 @@ export async function GET(req: Request) {
     const arrayBuffer = await contentRes.arrayBuffer();
     const bytes = new Uint8Array(arrayBuffer);
 
+    // 3) Upload file to Supabase storage
     const { error: uploadError } = await supabaseAdmin.storage
       .from("media")
       .upload(storagePath, bytes, {
@@ -168,6 +164,34 @@ export async function GET(req: Request) {
       );
     }
 
+    // 4) Check AGAIN after upload in case another request inserted first
+    const { data: existingAfterUpload, error: existingAfterUploadError } =
+      await supabaseAdmin
+        .from("media")
+        .select("id, url, storage_path")
+        .eq("type", "video")
+        .eq("storage_path", storagePath)
+        .maybeSingle();
+
+    if (existingAfterUploadError) {
+      return Response.json(
+        {
+          error: "Failed to re-check existing video",
+          details: existingAfterUploadError.message,
+        },
+        { status: 500 }
+      );
+    }
+
+    if (existingAfterUpload?.url) {
+      return Response.json({
+        status: "completed",
+        progress: 100,
+        downloadUrl: existingAfterUpload.url,
+      });
+    }
+
+    // 5) Insert metadata row once
     const { error: dbError } = await supabaseAdmin.from("media").insert({
       type: "video",
       prompt: job.prompt ?? "",
@@ -192,7 +216,6 @@ export async function GET(req: Request) {
     });
   } catch (error: any) {
     console.error("VIDEO GET ERROR:", error);
-
     return Response.json(
       {
         error: "Status check failed",
