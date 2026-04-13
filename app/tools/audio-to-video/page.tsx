@@ -10,13 +10,12 @@ const SIZE_OPTIONS = [
 const SECOND_OPTIONS = ["4", "8", "12"];
 
 export default function AudioToVideoPage() {
-  const fileRef = useRef<HTMLInputElement | null>(null);
   const handled = useRef(false);
 
+  const [file, setFile] = useState<File | null>(null);
   const [prompt, setPrompt] = useState("");
   const [seconds, setSeconds] = useState("8");
   const [size, setSize] = useState("1280x720");
-
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -29,9 +28,10 @@ export default function AudioToVideoPage() {
 
     const timer = setInterval(async () => {
       try {
-        const res = await fetch(`/api/audio-to-video?id=${encodeURIComponent(jobId)}`, {
-          cache: "no-store",
-        });
+        const res = await fetch(
+          `/api/audio-to-video?id=${encodeURIComponent(jobId)}`,
+          { cache: "no-store" }
+        );
         const data = await res.json();
 
         if (!res.ok) {
@@ -71,7 +71,6 @@ export default function AudioToVideoPage() {
 
     try {
       const fd = new FormData();
-      const file = fileRef.current?.files?.[0];
 
       if (file) fd.append("audio", file);
       fd.append("prompt", prompt);
@@ -140,14 +139,14 @@ export default function AudioToVideoPage() {
 
           <input
             id="audio-upload"
-            ref={fileRef}
             type="file"
-            accept="audio/*"
+            accept=".mp3,.wav,.mp4"
             style={{ display: "none" }}
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
           />
 
           <div style={{ marginTop: 8, fontSize: 14, opacity: 0.8 }}>
-            {fileRef.current?.files?.[0]?.name || "No file chosen"}
+            {file?.name || "No file chosen"}
           </div>
         </div>
 
@@ -155,6 +154,7 @@ export default function AudioToVideoPage() {
           <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
             Describe Visuals
           </label>
+
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
@@ -181,9 +181,17 @@ export default function AudioToVideoPage() {
           }}
         >
           <div>
-            <label style={{ display: "block", fontSize: 14, marginBottom: 6, opacity: 0.85 }}>
+            <label
+              style={{
+                display: "block",
+                fontSize: 14,
+                marginBottom: 6,
+                opacity: 0.85,
+              }}
+            >
               Video Length
             </label>
+
             <select
               value={seconds}
               onChange={(e) => setSeconds(e.target.value)}
@@ -204,9 +212,17 @@ export default function AudioToVideoPage() {
           </div>
 
           <div>
-            <label style={{ display: "block", fontSize: 14, marginBottom: 6, opacity: 0.85 }}>
+            <label
+              style={{
+                display: "block",
+                fontSize: 14,
+                marginBottom: 6,
+                opacity: 0.85,
+              }}
+            >
               Size
             </label>
+
             <select
               value={size}
               onChange={(e) => setSize(e.target.value)}
