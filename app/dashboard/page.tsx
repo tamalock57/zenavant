@@ -14,9 +14,21 @@ const tools = [
   },
   {
     title: "Video Maker",
-    description: "Create videos from prompts or media.",
+    description: "Create videos from prompts.",
     href: "/tools/video-maker",
     cta: "Open Video Maker",
+  },
+  {
+    title: "Image to Video",
+    description: "Upload an image and turn it into motion.",
+    href: "/tools/image-to-video",
+    cta: "Open Image to Video",
+  },
+  {
+    title: "Audio to Video",
+    description: "Upload audio and build a video around it.",
+    href: "/tools/audio-to-video",
+    cta: "Open Audio to Video",
   },
   {
     title: "Plan Tool",
@@ -35,13 +47,11 @@ const tools = [
 export default function DashboardPage() {
   const router = useRouter();
 
-  // ✅ LOGOUT FUNCTION (button uses this)
   async function handleLogout() {
     await supabase.auth.signOut();
     router.push("/");
   }
 
-  // ✅ PROTECT DASHBOARD
   useEffect(() => {
     async function checkUser() {
       const {
@@ -60,9 +70,7 @@ export default function DashboardPage() {
     <main className="mx-auto max-w-5xl px-4 py-8">
       <div className="mb-8 flex items-center justify-between">
         <div>
-          <h1 className="text-4xl font-semibold tracking-tight">
-            Dashboard
-          </h1>
+          <h1 className="text-4xl font-semibold tracking-tight">Dashboard</h1>
           <p className="mt-3 text-base text-gray-600">
             Choose a tool and start creating.
           </p>
