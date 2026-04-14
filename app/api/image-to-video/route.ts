@@ -1,6 +1,6 @@
 import OpenAI from "openai";
+import sharp from "sharp";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { imageSize } from "image-size";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,9 +17,16 @@ function toBytes(buf: ArrayBuffer) {
   return new Uint8Array(buf);
 }
 
-function fileToDataUrl(file: File, base64: string) {
-  const mime = file.type || "image/png";
+function toDataUrl(mime: string, base64: string) {
   return `data:${mime};base64,${base64}`;
+}
+
+function getTargetSize(size: string) {
+  if (size === "720x1280") {
+    return { width: 720, height: 1280 };
+  }
+
+  return { width: 1280, height: 720 };
 }
 
 export async function POST(req: Request) {
@@ -29,10 +36,12 @@ export async function POST(req: Request) {
     const file = form.get("file") as File | null;
     const prompt = String(form.get("prompt") ?? "").trim();
     const seconds = String(form.get("seconds") ?? "8").trim() as "4" | "8" | "12";
-    const requestedSize = String(form.get("size") ?? "1280x720").trim() as
+    const size = String(form.get("size") ?? "1280x720").trim() as
       | "1280x720"
       | "720x1280";
-    const model = String(form.get("model") ?? "sora-2").trim();
+    const model = String(form.get("model") ?? "sora-2").trim() as
+      | "sora-2"
+      | "sora-2-pro";
 
     if (!process.env.OPENAI_API_KEY) {
       return jsonError("Missing OPENAI_API_KEY on server", 500);
@@ -49,7 +58,7 @@ export async function POST(req: Request) {
       return jsonError("Seconds must be 4, 8, or 12");
     }
 
-    if (!["1280x720", "720x1280"].includes(requestedSize)) {
+    if (!["1280x720", "720x1280"].includes(size)) {
       return jsonError("Size must be 1280x720 or 720x1280");
     }
 
@@ -57,33 +66,27 @@ export async function POST(req: Request) {
       return jsonError("Model must be sora-2 or sora-2-pro");
     }
 
-    const buffer = await file.arrayBuffer();
-    const bytes = Buffer.from(buffer);
+    const inputBuffer = Buffer.from(await file.arrayBuffer());
+    const { width, height } = getTargetSize(size);
 
-    const dims = imageSize(bytes);
-    const width = dims.width ?? 0;
-    const height = dims.height ?? 0;
+    // Resize + center crop so the uploaded image always matches the requested video size.
+    // "cover" preserves the image without distortion, cropping only what is needed.
+    const processedBuffer = await sharp(inputBuffer)
+      .resize(width, height, {
+        fit: "cover",
+        position: "centre",
+      })
+      .png()
+      .toBuffer();
 
-    if (!width || !height) {
-      return jsonError("Could not read image dimensions");
-    }
-
-    const actualSize = `${width}x${height}`;
-
-    if (actualSize !== requestedSize) {
-      return jsonError(
-        `Uploaded image is ${actualSize}. It must exactly match the selected size (${requestedSize}). Use a 1280x720 image for landscape or 720x1280 for portrait.`
-      );
-    }
-
-    const base64 = bytes.toString("base64");
-    const dataUrl = fileToDataUrl(file, base64);
+    const base64 = processedBuffer.toString("base64");
+    const dataUrl = toDataUrl("image/png", base64);
 
     const job = await openai.videos.create({
       model,
       prompt,
       seconds,
-      size: requestedSize,
+      size,
       input_reference: {
         image_url: dataUrl,
       } as any,
@@ -197,10 +200,7 @@ export async function GET(req: Request) {
     const url = data.publicUrl;
 
     if (!url) {
-      return Response.json(
-        { error: "Failed to get public URL" },
-        { status: 500 }
-      );
+      return Response.json({ error: "Failed to get public URL" }, { status: 500 });
     }
 
     const { error: insertError } = await supabaseAdmin.from("media").insert({
