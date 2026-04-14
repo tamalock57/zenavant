@@ -16,25 +16,67 @@ function toBytes(buf: ArrayBuffer) {
   return new Uint8Array(buf);
 }
 
+function fileToDataUrl(file: File, base64: string) {
+  const mime = file.type || "image/png";
+  return `data:${mime};base64,${base64}`;
+}
+
 export async function POST(req: Request) {
   try {
     const form = await req.formData();
 
     const file = form.get("file") as File | null;
     const prompt = String(form.get("prompt") ?? "").trim();
-    const seconds = String(form.get("seconds") ?? "8");
-    const size = String(form.get("size") ?? "1280x720");
-    const model = String(form.get("model") ?? "sora-2");
+    const seconds = String(form.get("seconds") ?? "8").trim() as "4" | "8" | "12";
+    const size = String(form.get("size") ?? "1280x720").trim() as
+      | "1280x720"
+      | "720x1280"
+      | "1792x1024"
+      | "1024x1792";
+    const model = String(form.get("model") ?? "sora-2").trim() as
+      | "sora-2"
+      | "sora-2-pro";
+
+    if (!process.env.OPENAI_API_KEY) {
+      return jsonError("Missing OPENAI_API_KEY on server", 500);
+    }
 
     if (!file) return jsonError("Missing image");
     if (!prompt) return jsonError("Missing prompt");
 
+    if (!file.type.startsWith("image/")) {
+      return jsonError("Uploaded file must be an image");
+    }
+
+    if (!["4", "8", "12"].includes(seconds)) {
+      return jsonError("Seconds must be 4, 8, or 12");
+    }
+
+    if (
+      !["1280x720", "720x1280", "1792x1024", "1024x1792"].includes(size)
+    ) {
+      return jsonError(
+        "Size must be 1280x720, 720x1280, 1792x1024, or 1024x1792"
+      );
+    }
+
+    if (!["sora-2", "sora-2-pro"].includes(model)) {
+      return jsonError("Model must be sora-2 or sora-2-pro");
+    }
+
+    const buffer = await file.arrayBuffer();
+    const base64 = Buffer.from(buffer).toString("base64");
+    const dataUrl = fileToDataUrl(file, base64);
+
     const job = await openai.videos.create({
       model,
       prompt,
-      seconds: seconds as any,
-      size: size as any,
-    });
+      seconds,
+      size,
+      input_reference: {
+        image_url: dataUrl,
+      },
+    }as any);
 
     return Response.json({
       id: job.id,
@@ -74,11 +116,10 @@ export async function GET(req: Request) {
 
     const storagePath = `videos/image-to-video-${id}.mp4`;
 
-    // Check existing DB row first
     const { data: existingRow, error: existingError } = await supabaseAdmin
       .from("media")
       .select("id, url, storage_path")
-      .eq("type", "video")
+      .eq("type", "image_to_video")
       .eq("storage_path", storagePath)
       .maybeSingle();
 
@@ -141,10 +182,7 @@ export async function GET(req: Request) {
       );
     }
 
-    const { data } = supabaseAdmin.storage
-      .from("media")
-      .getPublicUrl(storagePath);
-
+    const { data } = supabaseAdmin.storage.from("media").getPublicUrl(storagePath);
     const url = data.publicUrl;
 
     if (!url) {
@@ -155,7 +193,7 @@ export async function GET(req: Request) {
     }
 
     const { error: insertError } = await supabaseAdmin.from("media").insert({
-      type: "video",
+      type: "image_to_video",
       prompt: job.prompt ?? "",
       url,
       storage_path: storagePath,
