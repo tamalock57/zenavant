@@ -203,22 +203,30 @@ export async function GET(req: Request) {
       return Response.json({ error: "Failed to get public URL" }, { status: 500 });
     }
 
-    const { error: insertError } = await supabaseAdmin.from("media").insert({
+    const { error: upsertError } = await supabaseAdmin
+  .from("media")
+  .upsert(
+    {
       type: "image_to_video",
       prompt: job.prompt ?? "",
       url,
       storage_path: storagePath,
-    });
-
-    if (insertError) {
-      return Response.json(
-        {
-          error: "DB insert failed",
-          details: insertError.message,
-        },
-        { status: 500 }
-      );
+    },
+    {
+      onConflict: "storage_path",
     }
+  );
+
+if (upsertError) {
+  return Response.json(
+    {
+      error: "DB upsert failed",
+      details: upsertError.message,
+    },
+    { status: 500 }
+  );
+}
+
 
     return Response.json({
       status: "completed",
