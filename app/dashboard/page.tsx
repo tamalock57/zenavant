@@ -25,12 +25,6 @@ const tools = [
     cta: "Open Image to Video",
   },
   {
-    title: "Audio to Video",
-    description: "Upload audio and build a video around it.",
-    href: "/tools/audio-to-video",
-    cta: "Open Audio to Video",
-  },
-  {
     title: "Plan Tool",
     description: "Turn thoughts into structured plans.",
     href: "/tools/turn-thought-into-plan",
