@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { imageSize } from "image-size";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,14 +29,10 @@ export async function POST(req: Request) {
     const file = form.get("file") as File | null;
     const prompt = String(form.get("prompt") ?? "").trim();
     const seconds = String(form.get("seconds") ?? "8").trim() as "4" | "8" | "12";
-    const size = String(form.get("size") ?? "1280x720").trim() as
+    const requestedSize = String(form.get("size") ?? "1280x720").trim() as
       | "1280x720"
-      | "720x1280"
-      | "1792x1024"
-      | "1024x1792";
-    const model = String(form.get("model") ?? "sora-2").trim() as
-      | "sora-2"
-      | "sora-2-pro";
+      | "720x1280";
+    const model = String(form.get("model") ?? "sora-2").trim();
 
     if (!process.env.OPENAI_API_KEY) {
       return jsonError("Missing OPENAI_API_KEY on server", 500);
@@ -52,12 +49,8 @@ export async function POST(req: Request) {
       return jsonError("Seconds must be 4, 8, or 12");
     }
 
-    if (
-      !["1280x720", "720x1280", "1792x1024", "1024x1792"].includes(size)
-    ) {
-      return jsonError(
-        "Size must be 1280x720, 720x1280, 1792x1024, or 1024x1792"
-      );
+    if (!["1280x720", "720x1280"].includes(requestedSize)) {
+      return jsonError("Size must be 1280x720 or 720x1280");
     }
 
     if (!["sora-2", "sora-2-pro"].includes(model)) {
@@ -65,18 +58,36 @@ export async function POST(req: Request) {
     }
 
     const buffer = await file.arrayBuffer();
-    const base64 = Buffer.from(buffer).toString("base64");
+    const bytes = Buffer.from(buffer);
+
+    const dims = imageSize(bytes);
+    const width = dims.width ?? 0;
+    const height = dims.height ?? 0;
+
+    if (!width || !height) {
+      return jsonError("Could not read image dimensions");
+    }
+
+    const actualSize = `${width}x${height}`;
+
+    if (actualSize !== requestedSize) {
+      return jsonError(
+        `Uploaded image is ${actualSize}. It must exactly match the selected size (${requestedSize}). Use a 1280x720 image for landscape or 720x1280 for portrait.`
+      );
+    }
+
+    const base64 = bytes.toString("base64");
     const dataUrl = fileToDataUrl(file, base64);
 
     const job = await openai.videos.create({
       model,
       prompt,
       seconds,
-      size,
+      size: requestedSize,
       input_reference: {
         image_url: dataUrl,
-      },
-    }as any);
+      } as any,
+    } as any);
 
     return Response.json({
       id: job.id,
