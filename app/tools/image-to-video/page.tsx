@@ -11,6 +11,8 @@ const SECOND_OPTIONS = ["4", "8", "12"];
 
 export default function ImageToVideoPage() {
   const handled = useRef(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const refFilesRef = useRef<HTMLInputElement | null>(null);
 
   const [file, setFile] = useState<File | null>(null);
   const [referenceFiles, setReferenceFiles] = useState<File[]>([]);
@@ -18,6 +20,8 @@ export default function ImageToVideoPage() {
   const [seconds, setSeconds] = useState("8");
   const [size, setSize] = useState("1280x720");
   const [model, setModel] = useState("sora-2");
+  const [fitMode, setFitMode] = useState<"preserve" | "fill">("preserve");
+
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -30,10 +34,9 @@ export default function ImageToVideoPage() {
 
     const timer = setInterval(async () => {
       try {
-        const res = await fetch(
-          `/api/image-to-video?id=${encodeURIComponent(jobId)}`,
-          { cache: "no-store" }
-        );
+        const res = await fetch(`/api/image-to-video?id=${encodeURIComponent(jobId)}`, {
+          cache: "no-store",
+        });
         const data = await res.json();
 
         if (!res.ok) {
@@ -72,22 +75,16 @@ export default function ImageToVideoPage() {
     setStatus(null);
 
     try {
-      if (!file) {
-        setError("Please upload a main image.");
-        setLoading(false);
-        return;
-      }
-
       const fd = new FormData();
-      fd.append("file", file);
+
+      if (file) fd.append("file", file);
+      referenceFiles.forEach((f) => fd.append("references", f));
+
       fd.append("prompt", prompt);
       fd.append("seconds", seconds);
       fd.append("size", size);
       fd.append("model", model);
-
-      referenceFiles.forEach((refFile) => {
-        fd.append("referenceFiles", refFile);
-      });
+      fd.append("fitMode", fitMode);
 
       const res = await fetch("/api/image-to-video", {
         method: "POST",
@@ -112,238 +109,84 @@ export default function ImageToVideoPage() {
 
   return (
     <main style={{ maxWidth: 760, margin: "0 auto", padding: 24 }}>
-      <h1 style={{ fontSize: 34, fontWeight: 750, marginBottom: 6 }}>
-        Image → Video
-      </h1>
+      <h1 style={{ fontSize: 34, fontWeight: 750 }}>Image → Video</h1>
 
-      <p style={{ opacity: 0.8, marginTop: 0 }}>
-        Upload a main image, add optional reference images, and generate motion
-        from your prompt.
-      </p>
-
-      <div
-        style={{
-          marginTop: 16,
-          padding: 16,
-          border: "1px solid rgba(0,0,0,0.12)",
-          borderRadius: 12,
-          background: "#fff",
-        }}
-      >
-        <div>
-          <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
-            Main Image
-          </label>
-          <input
-            type="file"
-            accept=".png,.jpg,.jpeg,.webp"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          />
-          <div style={{ marginTop: 8, fontSize: 14, opacity: 0.8 }}>
-            {file?.name || "No file chosen"}
-          </div>
-        </div>
-
-        <div style={{ marginTop: 16 }}>
-          <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
-            Extra Reference Images (optional)
-          </label>
-          <input
-            type="file"
-            accept=".png,.jpg,.jpeg,.webp"
-            multiple
-            onChange={(e) =>
-              setReferenceFiles(Array.from(e.target.files || []))
-            }
-          />
-          <div style={{ marginTop: 8, fontSize: 14, opacity: 0.8 }}>
-            {referenceFiles.length > 0
-              ? `${referenceFiles.length} reference image(s) selected`
-              : "No reference images selected"}
-          </div>
-        </div>
-
-        <div style={{ marginTop: 12 }}>
-          <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
-            Describe Motion
-          </label>
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Describe motion..."
-            rows={4}
-            style={{
-              width: "100%",
-              padding: 12,
-              fontSize: 16,
-              borderRadius: 10,
-              border: "1px solid rgba(0,0,0,0.18)",
-              boxSizing: "border-box",
-            }}
-          />
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            gap: 12,
-            flexWrap: "wrap",
-            marginTop: 12,
-            alignItems: "end",
-          }}
-        >
-          <div>
-            <label
-              style={{
-                display: "block",
-                fontSize: 14,
-                marginBottom: 6,
-                opacity: 0.85,
-              }}
-            >
-              Model
-            </label>
-            <select
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              style={{
-                padding: "10px 12px",
-                fontSize: 16,
-                borderRadius: 10,
-                border: "1px solid rgba(0,0,0,0.2)",
-                background: "#fff",
-              }}
-            >
-              <option value="sora-2">sora-2</option>
-              <option value="sora-2-pro">sora-2-pro</option>
-            </select>
-          </div>
-
-          <div>
-            <label
-              style={{
-                display: "block",
-                fontSize: 14,
-                marginBottom: 6,
-                opacity: 0.85,
-              }}
-            >
-              Video Length
-            </label>
-            <select
-              value={seconds}
-              onChange={(e) => setSeconds(e.target.value)}
-              style={{
-                padding: "10px 12px",
-                fontSize: 16,
-                borderRadius: 10,
-                border: "1px solid rgba(0,0,0,0.2)",
-                background: "#fff",
-              }}
-            >
-              {SECOND_OPTIONS.map((s) => (
-                <option key={s} value={s}>
-                  {s} seconds
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label
-              style={{
-                display: "block",
-                fontSize: 14,
-                marginBottom: 6,
-                opacity: 0.85,
-              }}
-            >
-              Size
-            </label>
-            <select
-              value={size}
-              onChange={(e) => setSize(e.target.value)}
-              style={{
-                padding: "10px 12px",
-                fontSize: 16,
-                borderRadius: 10,
-                border: "1px solid rgba(0,0,0,0.2)",
-                background: "#fff",
-              }}
-            >
-              {SIZE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <button
-          onClick={generate}
-          disabled={loading}
-          style={{
-            marginTop: 12,
-            padding: "10px 14px",
-            fontSize: 16,
-            borderRadius: 10,
-            border: "1px solid rgba(0,0,0,0.2)",
-            background: loading ? "rgba(0,0,0,0.08)" : "#111",
-            color: loading ? "#444" : "#fff",
-            cursor: loading ? "not-allowed" : "pointer",
-            fontWeight: 600,
-          }}
-        >
-          {loading ? "Generating..." : "Generate Video"}
-        </button>
-
-        <div style={{ marginTop: 16, fontSize: 16 }}>
-          <div>
-            <b>Status:</b> {status ?? "—"}
-          </div>
-        </div>
-
-        {error && (
-          <div
-            style={{
-              marginTop: 12,
-              padding: 12,
-              borderRadius: 10,
-              border: "1px solid rgba(220,38,38,0.25)",
-              background: "rgba(254,242,242,1)",
-              color: "#991b1b",
-            }}
-          >
-            {error}
-          </div>
-        )}
+      {/* MAIN IMAGE */}
+      <div style={{ marginTop: 16 }}>
+        <label>Upload Main Image</label>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+        />
       </div>
 
-      {videoUrl && (
-        <section
-          style={{
-            marginTop: 18,
-            padding: 16,
-            border: "1px solid rgba(0,0,0,0.12)",
-            borderRadius: 12,
-            background: "#fff",
-          }}
+      {/* REFERENCE IMAGES */}
+      <div style={{ marginTop: 16 }}>
+        <label>Reference Images (optional)</label>
+        <input
+          ref={refFilesRef}
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={(e) =>
+            setReferenceFiles(Array.from(e.target.files ?? []))
+          }
+        />
+      </div>
+
+      {/* PROMPT */}
+      <div style={{ marginTop: 16 }}>
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="Describe motion..."
+          rows={4}
+          style={{ width: "100%", padding: 12 }}
+        />
+      </div>
+
+      {/* SETTINGS */}
+      <div style={{ marginTop: 16 }}>
+        <select value={seconds} onChange={(e) => setSeconds(e.target.value)}>
+          {SECOND_OPTIONS.map((s) => (
+            <option key={s}>{s}</option>
+          ))}
+        </select>
+
+        <select value={size} onChange={(e) => setSize(e.target.value)}>
+          {SIZE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* FIT MODE */}
+      <div style={{ marginTop: 16 }}>
+        <label>Fit Mode</label>
+        <select
+          value={fitMode}
+          onChange={(e) =>
+            setFitMode(e.target.value as "preserve" | "fill")
+          }
         >
-          <h2 style={{ fontSize: 18, fontWeight: 750, marginTop: 0 }}>
-            Result
-          </h2>
-          <video
-            controls
-            src={videoUrl}
-            style={{
-              width: "100%",
-              borderRadius: 10,
-              marginTop: 10,
-            }}
-          />
-        </section>
-      )}
+          <option value="preserve">Preserve (faces)</option>
+          <option value="fill">Fill (crop)</option>
+        </select>
+      </div>
+
+      <button onClick={generate} disabled={loading} style={{ marginTop: 16 }}>
+        {loading ? "Generating..." : "Generate"}
+      </button>
+
+      <div>Status: {status}</div>
+
+      {error && <div style={{ color: "red" }}>{error}</div>}
+
+      {videoUrl && <video src={videoUrl} controls style={{ width: "100%" }} />}
     </main>
   );
 }
