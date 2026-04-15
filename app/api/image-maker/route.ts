@@ -1,102 +1,120 @@
-import OpenAI from "openai";
+import OpenAI, { toFile } from "openai";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-function base64ToUint8Array(base64: string) {
-  const buffer = Buffer.from(base64, "base64");
-  return new Uint8Array(buffer);
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+function jsonError(message: string, status = 400) {
+  return Response.json({ error: message }, { status });
+}
+
+function decodeBase64Image(b64: string) {
+  return Buffer.from(b64, "base64");
 }
 
 export async function POST(req: Request) {
   try {
-    const { prompt, size } = await req.json();
+    const form = await req.formData();
+
+    const prompt = String(form.get("prompt") ?? "").trim();
+    const size = String(form.get("size") ?? "1024x1024").trim();
+
+    const mainImage = form.get("mainImage") as File | null;
+    const referenceImages = form.getAll("referenceImages") as File[];
+    const allReferenceFiles = [
+      ...(mainImage ? [mainImage] : []),
+      ...referenceImages.filter(Boolean),
+    ];
 
     if (!process.env.OPENAI_API_KEY) {
-      return Response.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
+      return jsonError("Missing OPENAI_API_KEY on server", 500);
     }
 
-    if (!prompt || typeof prompt !== "string" || prompt.trim().length < 5) {
-      return Response.json({ error: "Missing or too-short prompt" }, { status: 400 });
+    if (!prompt) {
+      return jsonError("Missing prompt");
     }
 
-    const allowedSizes = new Set(["1024x1024", "1024x1536", "1536x1024"]);
-    const finalSize = allowedSizes.has(size) ? size : "1024x1024";
-
-    const client = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
-
-    const result = await client.images.generate({
-      model: "gpt-image-1",
-      prompt: prompt.trim(),
-      size: finalSize as "1024x1024" | "1024x1536" | "1536x1024",
-    });
-
-    const b64 = result.data?.[0]?.b64_json;
-
-    if (!b64) {
-      return Response.json({ error: "No image returned" }, { status: 500 });
+    for (const file of allReferenceFiles) {
+      if (!file.type.startsWith("image/")) {
+        return jsonError("All references must be image files");
+      }
     }
 
-    const bytes = base64ToUint8Array(b64);
+    let resultB64: string | null = null;
 
-    const filename = `${Date.now()}-${Math.random().toString(16).slice(2)}.png`;
-    const storagePath = `images/${filename}`;
+    if (allReferenceFiles.length > 0) {
+      const openaiFiles = await Promise.all(
+        allReferenceFiles.map(async (file) => {
+          const arrayBuffer = await file.arrayBuffer();
+          return toFile(Buffer.from(arrayBuffer), file.name || "reference.png", {
+            type: file.type || "image/png",
+          });
+        })
+      );
 
-    const upload = await supabaseAdmin.storage.from("media").upload(storagePath, bytes, {
+      const edited = await openai.images.edit({
+        model: "gpt-image-1.5",
+        image: openaiFiles,
+        prompt,
+        size: size as "1024x1024" | "1536x1024" | "1024x1536",
+        input_fidelity: "high",
+      });
+
+      resultB64 = edited.data?.[0]?.b64_json ?? null;
+    } else {
+      const generated = await openai.images.generate({
+        model: "gpt-image-1.5",
+        prompt,
+        size: size as "1024x1024" | "1536x1024" | "1024x1536",
+      });
+
+      resultB64 = generated.data?.[0]?.b64_json ?? null;
+    }
+
+    if (!resultB64) {
+      return jsonError("No image returned from OpenAI", 500);
+    }
+
+    const buffer = decodeBase64Image(resultB64);
+    const fileName = `images/${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2)}.png`;
+
+    const upload = await supabaseAdmin.storage.from("media").upload(fileName, buffer, {
       contentType: "image/png",
       upsert: false,
     });
 
     if (upload.error) {
-      return Response.json(
-        {
-          error: "Supabase upload failed",
-          details: upload.error.message,
-        },
-        { status: 500 }
-      );
+      return jsonError(`Supabase upload failed: ${upload.error.message}`, 500);
     }
 
-    const { data: publicData } = supabaseAdmin.storage
+    const { data: publicUrlData } = supabaseAdmin.storage
       .from("media")
-      .getPublicUrl(storagePath);
+      .getPublicUrl(fileName);
 
-    const publicUrl = publicData?.publicUrl;
-
-    if (!publicUrl) {
-      return Response.json({ error: "Failed to get public URL" }, { status: 500 });
-    }
+    const url = publicUrlData.publicUrl;
 
     const { error: dbError } = await supabaseAdmin.from("media").insert({
       type: "image",
-      prompt: prompt.trim(),
-      url: publicUrl,
-      storage_path: storagePath,
+      prompt,
+      url,
+      storage_path: fileName,
     });
 
     if (dbError) {
-      return Response.json(
-        {
-          error: "DB insert failed",
-          details: dbError.message,
-        },
-        { status: 500 }
-      );
+      return jsonError(`DB insert failed: ${dbError.message}`, 500);
     }
 
-    return Response.json({
-      imageUrl: publicUrl,
-    });
-  } catch (error: any) {
-    console.error("IMAGE MAKER ERROR:", error);
-
+    return Response.json({ url });
+  } catch (err: any) {
+    console.error("POST /api/image-maker error:", err);
     return Response.json(
-      {
-        error: "Image generation failed",
-        details: error?.message ?? String(error),
-      },
+      { error: err?.message ?? "Image generation failed" },
       { status: 500 }
     );
   }
