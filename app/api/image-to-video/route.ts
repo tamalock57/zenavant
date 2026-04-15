@@ -25,8 +25,69 @@ function getTargetSize(size: string) {
   if (size === "720x1280") {
     return { width: 720, height: 1280 };
   }
-
   return { width: 1280, height: 720 };
+}
+
+async function normalizeImage(file: File, width: number, height: number) {
+  const inputBuffer = Buffer.from(await file.arrayBuffer());
+
+  return sharp(inputBuffer)
+    .resize(width, height, {
+      fit: "cover",
+      position: "centre",
+    })
+    .png()
+    .toBuffer();
+}
+
+async function buildCompositeReference(
+  mainFile: File,
+  referenceFiles: File[],
+  size: "1280x720" | "720x1280"
+) {
+  const { width, height } = getTargetSize(size);
+
+  if (referenceFiles.length === 0) {
+    return normalizeImage(mainFile, width, height);
+  }
+
+  const stripHeight = size === "720x1280" ? 220 : 180;
+  const mainHeight = height - stripHeight;
+
+  const mainBuffer = await normalizeImage(mainFile, width, mainHeight);
+
+  const maxRefs = Math.min(referenceFiles.length, 4);
+  const refs = referenceFiles.slice(0, maxRefs);
+
+  const refWidth = Math.floor(width / maxRefs);
+
+  const refBuffers = await Promise.all(
+    refs.map((file) => normalizeImage(file, refWidth, stripHeight))
+  );
+
+  const refComposites = await Promise.all(
+    refBuffers.map(async (buffer, index) => ({
+      input: buffer,
+      left: index * refWidth,
+      top: mainHeight,
+    }))
+  );
+
+  const canvas = sharp({
+    create: {
+      width,
+      height,
+      channels: 4,
+      background: { r: 255, g: 255, b: 255, alpha: 1 },
+    },
+  }).png();
+
+  return canvas
+    .composite([
+      { input: mainBuffer, left: 0, top: 0 },
+      ...refComposites,
+    ])
+    .toBuffer();
 }
 
 export async function POST(req: Request) {
@@ -43,15 +104,25 @@ export async function POST(req: Request) {
       | "sora-2"
       | "sora-2-pro";
 
+    const referenceFiles = (form.getAll("referenceFiles") as File[]).filter(
+      Boolean
+    );
+
     if (!process.env.OPENAI_API_KEY) {
       return jsonError("Missing OPENAI_API_KEY on server", 500);
     }
 
-    if (!file) return jsonError("Missing image");
+    if (!file) return jsonError("Missing main image");
     if (!prompt) return jsonError("Missing prompt");
 
     if (!file.type.startsWith("image/")) {
-      return jsonError("Uploaded file must be an image");
+      return jsonError("Main file must be an image");
+    }
+
+    for (const ref of referenceFiles) {
+      if (!ref.type.startsWith("image/")) {
+        return jsonError("All reference files must be images");
+      }
     }
 
     if (!["4", "8", "12"].includes(seconds)) {
@@ -66,20 +137,13 @@ export async function POST(req: Request) {
       return jsonError("Model must be sora-2 or sora-2-pro");
     }
 
-    const inputBuffer = Buffer.from(await file.arrayBuffer());
-    const { width, height } = getTargetSize(size);
+    const compositeBuffer = await buildCompositeReference(
+      file,
+      referenceFiles,
+      size
+    );
 
-    // Resize + center crop so the uploaded image always matches the requested video size.
-    // "cover" preserves the image without distortion, cropping only what is needed.
-    const processedBuffer = await sharp(inputBuffer)
-      .resize(width, height, {
-        fit: "cover",
-        position: "centre",
-      })
-      .png()
-      .toBuffer();
-
-    const base64 = processedBuffer.toString("base64");
+    const base64 = compositeBuffer.toString("base64");
     const dataUrl = toDataUrl("image/png", base64);
 
     const job = await openai.videos.create({
@@ -200,33 +264,35 @@ export async function GET(req: Request) {
     const url = data.publicUrl;
 
     if (!url) {
-      return Response.json({ error: "Failed to get public URL" }, { status: 500 });
+      return Response.json(
+        { error: "Failed to get public URL" },
+        { status: 500 }
+      );
     }
 
     const { error: upsertError } = await supabaseAdmin
-  .from("media")
-  .upsert(
-    {
-      type: "image_to_video",
-      prompt: job.prompt ?? "",
-      url,
-      storage_path: storagePath,
-    },
-    {
-      onConflict: "storage_path",
+      .from("media")
+      .upsert(
+        {
+          type: "image_to_video",
+          prompt: job.prompt ?? "",
+          url,
+          storage_path: storagePath,
+        },
+        {
+          onConflict: "storage_path",
+        }
+      );
+
+    if (upsertError) {
+      return Response.json(
+        {
+          error: "DB upsert failed",
+          details: upsertError.message,
+        },
+        { status: 500 }
+      );
     }
-  );
-
-if (upsertError) {
-  return Response.json(
-    {
-      error: "DB upsert failed",
-      details: upsertError.message,
-    },
-    { status: 500 }
-  );
-}
-
 
     return Response.json({
       status: "completed",

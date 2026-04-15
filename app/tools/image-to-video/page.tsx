@@ -5,22 +5,19 @@ import { useEffect, useRef, useState } from "react";
 const SIZE_OPTIONS = [
   { value: "1280x720", label: "1280x720 (Landscape)" },
   { value: "720x1280", label: "720x1280 (Portrait)" },
-  { value: "1792x1024", label: "1792x1024 (Wide HD)" },
-  { value: "1024x1792", label: "1024x1792 (Tall HD)" },
 ];
 
 const SECOND_OPTIONS = ["4", "8", "12"];
 
 export default function ImageToVideoPage() {
   const handled = useRef(false);
-  const fileRef = useRef<HTMLInputElement | null>(null);
 
   const [file, setFile] = useState<File | null>(null);
+  const [referenceFiles, setReferenceFiles] = useState<File[]>([]);
   const [prompt, setPrompt] = useState("");
   const [seconds, setSeconds] = useState("8");
   const [size, setSize] = useState("1280x720");
   const [model, setModel] = useState("sora-2");
-
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -33,10 +30,10 @@ export default function ImageToVideoPage() {
 
     const timer = setInterval(async () => {
       try {
-        const res = await fetch(`/api/image-to-video?id=${encodeURIComponent(jobId)}`, {
-          cache: "no-store",
-        });
-
+        const res = await fetch(
+          `/api/image-to-video?id=${encodeURIComponent(jobId)}`,
+          { cache: "no-store" }
+        );
         const data = await res.json();
 
         if (!res.ok) {
@@ -75,13 +72,22 @@ export default function ImageToVideoPage() {
     setStatus(null);
 
     try {
-      const fd = new FormData();
+      if (!file) {
+        setError("Please upload a main image.");
+        setLoading(false);
+        return;
+      }
 
-      if (file) fd.append("file", file);
+      const fd = new FormData();
+      fd.append("file", file);
       fd.append("prompt", prompt);
       fd.append("seconds", seconds);
       fd.append("size", size);
       fd.append("model", model);
+
+      referenceFiles.forEach((refFile) => {
+        fd.append("referenceFiles", refFile);
+      });
 
       const res = await fetch("/api/image-to-video", {
         method: "POST",
@@ -111,7 +117,8 @@ export default function ImageToVideoPage() {
       </h1>
 
       <p style={{ opacity: 0.8, marginTop: 0 }}>
-        Upload an image and generate motion from your prompt.
+        Upload a main image, add optional reference images, and generate motion
+        from your prompt.
       </p>
 
       <div
@@ -125,38 +132,34 @@ export default function ImageToVideoPage() {
       >
         <div>
           <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
-            Upload Image
+            Main Image
           </label>
-
-          <label
-            htmlFor="image-upload"
-            style={{
-              display: "inline-block",
-              padding: "10px 14px",
-              borderRadius: 10,
-              border: "1px solid rgba(0,0,0,0.2)",
-              background: "#fff",
-              cursor: "pointer",
-              fontWeight: 600,
-            }}
-          >
-            Choose File
-          </label>
-
           <input
-            id="image-upload"
-            ref={fileRef}
             type="file"
-            accept="image/*"
-            style={{ display: "none" }}
-            onChange={(e) => {
-              const nextFile = e.target.files?.[0] ?? null;
-              setFile(nextFile);
-            }}
+            accept=".png,.jpg,.jpeg,.webp"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
           />
-
           <div style={{ marginTop: 8, fontSize: 14, opacity: 0.8 }}>
             {file?.name || "No file chosen"}
+          </div>
+        </div>
+
+        <div style={{ marginTop: 16 }}>
+          <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
+            Extra Reference Images (optional)
+          </label>
+          <input
+            type="file"
+            accept=".png,.jpg,.jpeg,.webp"
+            multiple
+            onChange={(e) =>
+              setReferenceFiles(Array.from(e.target.files || []))
+            }
+          />
+          <div style={{ marginTop: 8, fontSize: 14, opacity: 0.8 }}>
+            {referenceFiles.length > 0
+              ? `${referenceFiles.length} reference image(s) selected`
+              : "No reference images selected"}
           </div>
         </div>
 
@@ -190,7 +193,14 @@ export default function ImageToVideoPage() {
           }}
         >
           <div>
-            <label style={{ display: "block", fontSize: 14, marginBottom: 6, opacity: 0.85 }}>
+            <label
+              style={{
+                display: "block",
+                fontSize: 14,
+                marginBottom: 6,
+                opacity: 0.85,
+              }}
+            >
               Model
             </label>
             <select
@@ -205,11 +215,19 @@ export default function ImageToVideoPage() {
               }}
             >
               <option value="sora-2">sora-2</option>
+              <option value="sora-2-pro">sora-2-pro</option>
             </select>
           </div>
 
           <div>
-            <label style={{ display: "block", fontSize: 14, marginBottom: 6, opacity: 0.85 }}>
+            <label
+              style={{
+                display: "block",
+                fontSize: 14,
+                marginBottom: 6,
+                opacity: 0.85,
+              }}
+            >
               Video Length
             </label>
             <select
@@ -232,7 +250,14 @@ export default function ImageToVideoPage() {
           </div>
 
           <div>
-            <label style={{ display: "block", fontSize: 14, marginBottom: 6, opacity: 0.85 }}>
+            <label
+              style={{
+                display: "block",
+                fontSize: 14,
+                marginBottom: 6,
+                opacity: 0.85,
+              }}
+            >
               Size
             </label>
             <select
@@ -308,7 +333,6 @@ export default function ImageToVideoPage() {
           <h2 style={{ fontSize: 18, fontWeight: 750, marginTop: 0 }}>
             Result
           </h2>
-
           <video
             controls
             src={videoUrl}
