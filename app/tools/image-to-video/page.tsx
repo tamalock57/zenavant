@@ -13,7 +13,11 @@ export default function ImageToVideoPage() {
   const handled = useRef(false);
 
   const [file, setFile] = useState<File | null>(null);
-  const [referenceFiles, setReferenceFiles] = useState<File[]>([]);
+  const [referenceSlots, setReferenceSlots] = useState<(File | null)[]>([
+    null,
+    null,
+    null,
+  ]);
   const [prompt, setPrompt] = useState("");
   const [seconds, setSeconds] = useState("8");
   const [size, setSize] = useState("1280x720");
@@ -25,6 +29,28 @@ export default function ImageToVideoPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  function updateReferenceSlot(index: number, nextFile: File | null) {
+    setReferenceSlots((prev) => {
+      const next = [...prev];
+      next[index] = nextFile;
+      return next;
+    });
+  }
+
+  function addReferenceSlot() {
+    setReferenceSlots((prev) => {
+      if (prev.length >= 4) return prev;
+      return [...prev, null];
+    });
+  }
+
+  function removeReferenceSlot(index: number) {
+    setReferenceSlots((prev) => {
+      if (prev.length <= 1) return [null];
+      return prev.filter((_, i) => i !== index);
+    });
+  }
 
   useEffect(() => {
     if (!jobId) return;
@@ -39,6 +65,7 @@ export default function ImageToVideoPage() {
 
         const text = await res.text();
         let data: any = {};
+
         try {
           data = text ? JSON.parse(text) : {};
         } catch {
@@ -95,7 +122,11 @@ export default function ImageToVideoPage() {
 
       const fd = new FormData();
       fd.append("file", file);
-      referenceFiles.forEach((f) => fd.append("references", f));
+
+      referenceSlots
+        .filter((slot): slot is File => slot instanceof File)
+        .forEach((slot) => fd.append("references", slot));
+
       fd.append("prompt", prompt);
       fd.append("seconds", seconds);
       fd.append("size", size);
@@ -109,6 +140,7 @@ export default function ImageToVideoPage() {
 
       const text = await res.text();
       let data: any = {};
+
       try {
         data = text ? JSON.parse(text) : {};
       } catch {
@@ -136,7 +168,8 @@ export default function ImageToVideoPage() {
       </h1>
 
       <p style={{ opacity: 0.8, marginTop: 0 }}>
-        Upload a main image, optional reference images, and generate motion from your prompt.
+        Upload a main image, add optional reference images, and generate motion
+        from your prompt.
       </p>
 
       <div
@@ -166,16 +199,87 @@ export default function ImageToVideoPage() {
           <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
             Reference Images (optional)
           </label>
-          <input
-            type="file"
-            accept="image/*"
-            multiple
-            onChange={(e) => setReferenceFiles(Array.from(e.target.files ?? []))}
-          />
-          <div style={{ marginTop: 8, fontSize: 14, opacity: 0.8 }}>
-            {referenceFiles.length > 0
-              ? `${referenceFiles.length} reference image(s) selected`
-              : "No reference images selected"}
+
+          <div style={{ display: "grid", gap: 12 }}>
+            {referenceSlots.map((slotFile, index) => (
+              <div
+                key={index}
+                style={{
+                  padding: 12,
+                  border: "1px solid rgba(0,0,0,0.12)",
+                  borderRadius: 10,
+                  background: "#fafafa",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div style={{ minWidth: 140, fontWeight: 600 }}>
+                    Reference {index + 1}
+                  </div>
+
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) =>
+                      updateReferenceSlot(index, e.target.files?.[0] ?? null)
+                    }
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => removeReferenceSlot(index)}
+                    style={{
+                      padding: "8px 10px",
+                      fontSize: 14,
+                      borderRadius: 8,
+                      border: "1px solid rgba(0,0,0,0.15)",
+                      background: "#fff",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Remove
+                  </button>
+                </div>
+
+                <div style={{ marginTop: 8, fontSize: 14, opacity: 0.8 }}>
+                  {slotFile?.name || "No file chosen"}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={addReferenceSlot}
+            disabled={referenceSlots.length >= 4}
+            style={{
+              marginTop: 12,
+              padding: "10px 12px",
+              fontSize: 14,
+              borderRadius: 10,
+              border: "1px solid rgba(0,0,0,0.2)",
+              background:
+                referenceSlots.length >= 4 ? "rgba(0,0,0,0.08)" : "#fff",
+              color: "#111",
+              cursor: referenceSlots.length >= 4 ? "not-allowed" : "pointer",
+              fontWeight: 600,
+            }}
+          >
+            {referenceSlots.length >= 4
+              ? "Maximum references added"
+              : "Add Reference Slot"}
+          </button>
+
+          <div style={{ marginTop: 8, fontSize: 13, opacity: 0.75 }}>
+            Use cropped face images for stronger identity and wider images for
+            clothing or background support.
           </div>
         </div>
 
@@ -209,7 +313,14 @@ export default function ImageToVideoPage() {
           }}
         >
           <div>
-            <label style={{ display: "block", fontSize: 14, marginBottom: 6, opacity: 0.85 }}>
+            <label
+              style={{
+                display: "block",
+                fontSize: 14,
+                marginBottom: 6,
+                opacity: 0.85,
+              }}
+            >
               Model
             </label>
             <select
@@ -228,7 +339,14 @@ export default function ImageToVideoPage() {
           </div>
 
           <div>
-            <label style={{ display: "block", fontSize: 14, marginBottom: 6, opacity: 0.85 }}>
+            <label
+              style={{
+                display: "block",
+                fontSize: 14,
+                marginBottom: 6,
+                opacity: 0.85,
+              }}
+            >
               Video Length
             </label>
             <select
@@ -251,7 +369,14 @@ export default function ImageToVideoPage() {
           </div>
 
           <div>
-            <label style={{ display: "block", fontSize: 14, marginBottom: 6, opacity: 0.85 }}>
+            <label
+              style={{
+                display: "block",
+                fontSize: 14,
+                marginBottom: 6,
+                opacity: 0.85,
+              }}
+            >
               Size
             </label>
             <select
@@ -294,7 +419,8 @@ export default function ImageToVideoPage() {
           </select>
 
           <div style={{ marginTop: 8, fontSize: 13, opacity: 0.75 }}>
-            Preserve keeps the whole image. Fill crops to frame and is usually better when your crop is already strong.
+            Preserve keeps the whole image. Fill crops to frame and is usually
+            better when your crop is already strong.
           </div>
         </div>
 
@@ -315,6 +441,12 @@ export default function ImageToVideoPage() {
         >
           {loading ? "Generating..." : "Generate Video"}
         </button>
+
+        <div style={{ marginTop: 10, fontSize: 13, opacity: 0.75 }}>
+          Keep this page open while generating. Closing or refreshing the page
+          can interrupt the visible progress and may cause errors when you
+          return.
+        </div>
 
         <div style={{ marginTop: 16, fontSize: 16 }}>
           <b>Status:</b> {status ?? "—"}
@@ -349,7 +481,7 @@ export default function ImageToVideoPage() {
           <h2 style={{ fontSize: 18, fontWeight: 750, marginTop: 0 }}>
             Result
           </h2>
-      
+
           <video
             controls
             src={videoUrl}
