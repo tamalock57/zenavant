@@ -1,5 +1,4 @@
 import OpenAI from "openai";
-
 import sharp from "sharp";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
@@ -14,74 +13,79 @@ function jsonError(message: string, status = 400) {
   return Response.json({ error: message }, { status });
 }
 
+function toBytes(buf: ArrayBuffer) {
+  return new Uint8Array(buf);
+}
+
 async function normalizeImage(
   file: File,
   width: number,
   height: number,
   fitMode: "preserve" | "fill"
 ) {
-  const buffer = Buffer.from(await file.arrayBuffer());
+  const inputBuffer = Buffer.from(await file.arrayBuffer());
 
   if (fitMode === "fill") {
-    return sharp(buffer)
-      .resize(width, height, { fit: "cover" })
+    return sharp(inputBuffer)
+      .resize(width, height, {
+        fit: "cover",
+        position: "centre",
+      })
       .png()
       .toBuffer();
   }
 
-  return sharp(buffer)
+  return sharp(inputBuffer)
     .resize(width, height, {
       fit: "contain",
       background: { r: 0, g: 0, b: 0, alpha: 1 },
+      position: "centre",
     })
     .png()
     .toBuffer();
 }
 
-async function buildComposite(
-  main: File,
-  refs: File[],
+async function buildCompositeReference(
+  mainFile: File,
+  referenceFiles: File[],
   size: "1280x720" | "720x1280",
   fitMode: "preserve" | "fill"
 ) {
-  const [w, h] = size.split("x").map(Number);
+  const [width, height] = size.split("x").map(Number);
 
-  if (refs.length === 0) {
-    return normalizeImage(main, w, h, fitMode);
+  if (referenceFiles.length === 0) {
+    return normalizeImage(mainFile, width, height, fitMode);
   }
 
-  const mainHeight = Math.floor(h * 0.7);
-  const stripHeight = h - mainHeight;
-  const refWidth = Math.floor(w / refs.length);
+  const stripHeight = size === "720x1280" ? 220 : 180;
+  const mainHeight = height - stripHeight;
 
-  const mainBuf = await normalizeImage(main, w, mainHeight, fitMode);
+  const mainBuffer = await normalizeImage(mainFile, width, mainHeight, fitMode);
 
-  const refBufs = await Promise.all(
-    refs.map((r) => normalizeImage(r, refWidth, stripHeight, fitMode))
+  const refs = referenceFiles.slice(0, 4);
+  const refWidth = Math.floor(width / refs.length);
+
+  const refBuffers = await Promise.all(
+    refs.map((file) => normalizeImage(file, refWidth, stripHeight, fitMode))
   );
 
-  const composite = sharp({
+  const refComposites = refBuffers.map((buffer, index) => ({
+    input: buffer,
+    left: index * refWidth,
+    top: mainHeight,
+  }));
+
+  return sharp({
     create: {
-      width: w,
-      height: h,
+      width,
+      height,
       channels: 4,
-      background: "black",
+      background: { r: 255, g: 255, b: 255, alpha: 1 },
     },
-  });
-
-  const layers: any[] = [
-    { input: mainBuf, top: 0, left: 0 },
-  ];
-
-  refBufs.forEach((buf, i) => {
-    layers.push({
-      input: buf,
-      top: mainHeight,
-      left: i * refWidth,
-    });
-  });
-
-  return composite.composite(layers).png().toBuffer();
+  })
+    .composite([{ input: mainBuffer, left: 0, top: 0 }, ...refComposites])
+    .png()
+    .toBuffer();
 }
 
 export async function POST(req: Request) {
@@ -89,39 +93,205 @@ export async function POST(req: Request) {
     const form = await req.formData();
 
     const file = form.get("file") as File | null;
-    const refs = form.getAll("references") as File[];
-    const prompt = String(form.get("prompt") ?? "");
-    const seconds = String(form.get("seconds") ?? "8");
-    const size = String(form.get("size") ?? "1280x720") as
+    const prompt = String(form.get("prompt") ?? "").trim();
+    const seconds = String(form.get("seconds") ?? "8").trim() as "4" | "8" | "12";
+    const size = String(form.get("size") ?? "1280x720").trim() as
       | "1280x720"
       | "720x1280";
-    const fitMode = (form.get("fitMode") ?? "preserve") as
+    const model = String(form.get("model") ?? "sora-2").trim();
+    const fitMode = String(form.get("fitMode") ?? "preserve").trim() as
       | "preserve"
       | "fill";
 
-    if (!file) return jsonError("Missing image");
+    const referenceFiles = (form.getAll("references") as File[]).filter(Boolean);
 
-    const composite = await buildComposite(file, refs, size, fitMode);
+    if (!process.env.OPENAI_API_KEY) {
+      return jsonError("Missing OPENAI_API_KEY on server", 500);
+    }
 
-    const base64 = composite.toString("base64");
+    if (!file) return jsonError("Missing main image");
+    if (!prompt) return jsonError("Missing prompt");
+
+    if (!["4", "8", "12"].includes(seconds)) {
+      return jsonError("Seconds must be 4, 8, or 12");
+    }
+
+    if (!["1280x720", "720x1280"].includes(size)) {
+      return jsonError("Size must be 1280x720 or 720x1280");
+    }
+
+    if (!["preserve", "fill"].includes(fitMode)) {
+      return jsonError("fitMode must be preserve or fill");
+    }
+
+    const compositeBuffer = await buildCompositeReference(
+      file,
+      referenceFiles,
+      size,
+      fitMode
+    );
+
+    const base64 = compositeBuffer.toString("base64");
     const dataUrl = `data:image/png;base64,${base64}`;
 
     const job = await openai.videos.create({
-      model: "sora-2",
+      model,
       prompt,
-      seconds: seconds as any,
-      size: size as any,
+      seconds,
+      size,
       input_reference: {
         image_url: dataUrl,
       } as any,
     } as any);
-  
+
     return Response.json({
       id: job.id,
       status: job.status,
+      progress: job.progress ?? 0,
     });
   } catch (err: any) {
-    console.error(err);
-    return jsonError(err.message, 500);
+    console.error("POST image-to-video error:", err);
+    return Response.json(
+      { error: err?.message ?? "Image-to-video failed" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function GET(req: Request) {
+  try {
+    const id = new URL(req.url).searchParams.get("id");
+    if (!id) return jsonError("Missing id");
+
+    const job = await openai.videos.retrieve(id);
+
+    if (job.status === "failed") {
+      return Response.json({
+        status: "failed",
+        progress: job.progress ?? 0,
+        error: job.error?.message ?? "Image-to-video failed",
+      });
+    }
+
+    if (job.status !== "completed") {
+      return Response.json({
+        status: job.status,
+        progress: job.progress ?? 0,
+      });
+    }
+
+    const storagePath = `videos/image-to-video-${id}.mp4`;
+
+    const { data: existingRow, error: existingError } = await supabaseAdmin
+      .from("media")
+      .select("id, url, storage_path")
+      .eq("type", "image_to_video")
+      .eq("storage_path", storagePath)
+      .maybeSingle();
+
+    if (existingError) {
+      return Response.json(
+        {
+          error: "Failed to check existing video",
+          details: existingError.message,
+        },
+        { status: 500 }
+      );
+    }
+
+    if (existingRow?.url) {
+      return Response.json({
+        status: "completed",
+        progress: 100,
+        downloadUrl: existingRow.url,
+      });
+    }
+
+    const contentRes = await fetch(
+      `https://api.openai.com/v1/videos/${id}/content`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+      }
+    );
+
+    if (!contentRes.ok) {
+      const text = await contentRes.text().catch(() => "");
+      return Response.json(
+        {
+          error: "Failed to download video content",
+          details: text,
+        },
+        { status: 500 }
+      );
+    }
+
+    const buf = await contentRes.arrayBuffer();
+
+    const upload = await supabaseAdmin.storage.from("media").upload(
+      storagePath,
+      toBytes(buf),
+      {
+        contentType: "video/mp4",
+        upsert: true,
+      }
+    );
+
+    if (upload.error) {
+      return Response.json(
+        {
+          error: "Supabase upload failed",
+          details: upload.error.message,
+        },
+        { status: 500 }
+      );
+    }
+
+    const { data } = supabaseAdmin.storage.from("media").getPublicUrl(storagePath);
+    const url = data.publicUrl;
+
+    if (!url) {
+      return Response.json(
+        { error: "Failed to get public URL" },
+        { status: 500 }
+      );
+    }
+
+    const { error: upsertError } = await supabaseAdmin
+      .from("media")
+      .upsert(
+        {
+          type: "image_to_video",
+          prompt: job.prompt ?? "",
+          url,
+          storage_path: storagePath,
+        },
+        {
+          onConflict: "storage_path",
+        }
+      );
+
+    if (upsertError) {
+      return Response.json(
+        {
+          error: "DB upsert failed",
+          details: upsertError.message,
+        },
+        { status: 500 }
+      );
+    }
+
+    return Response.json({
+      status: "completed",
+      progress: 100,
+      downloadUrl: url,
+    });
+  } catch (err: any) {
+    console.error("GET image-to-video error:", err);
+    return Response.json(
+      { error: err?.message ?? "Image-to-video status failed" },
+      { status: 500 }
+    );
   }
 }

@@ -11,8 +11,6 @@ const SECOND_OPTIONS = ["4", "8", "12"];
 
 export default function ImageToVideoPage() {
   const handled = useRef(false);
-  const fileRef = useRef<HTMLInputElement | null>(null);
-  const refFilesRef = useRef<HTMLInputElement | null>(null);
 
   const [file, setFile] = useState<File | null>(null);
   const [referenceFiles, setReferenceFiles] = useState<File[]>([]);
@@ -34,10 +32,18 @@ export default function ImageToVideoPage() {
 
     const timer = setInterval(async () => {
       try {
-        const res = await fetch(`/api/image-to-video?id=${encodeURIComponent(jobId)}`, {
-          cache: "no-store",
-        });
-        const data = await res.json();
+        const res = await fetch(
+          `/api/image-to-video?id=${encodeURIComponent(jobId)}`,
+          { cache: "no-store" }
+        );
+
+        const text = await res.text();
+        let data: any = {};
+        try {
+          data = text ? JSON.parse(text) : {};
+        } catch {
+          data = { error: text || "Invalid server response" };
+        }
 
         if (!res.ok) {
           setError(data?.error || "Failed to refresh status");
@@ -45,7 +51,7 @@ export default function ImageToVideoPage() {
           return;
         }
 
-        setStatus(data.status);
+        setStatus(data.status ?? null);
 
         if (data.status === "completed" && !handled.current) {
           handled.current = true;
@@ -75,11 +81,21 @@ export default function ImageToVideoPage() {
     setStatus(null);
 
     try {
+      if (!file) {
+        setError("Please upload a main image.");
+        setLoading(false);
+        return;
+      }
+
+      if (!prompt.trim()) {
+        setError("Please enter a motion prompt.");
+        setLoading(false);
+        return;
+      }
+
       const fd = new FormData();
-
-      if (file) fd.append("file", file);
+      fd.append("file", file);
       referenceFiles.forEach((f) => fd.append("references", f));
-
       fd.append("prompt", prompt);
       fd.append("seconds", seconds);
       fd.append("size", size);
@@ -91,7 +107,13 @@ export default function ImageToVideoPage() {
         body: fd,
       });
 
-      const data = await res.json();
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = { error: text || "Invalid server response" };
+      }
 
       if (!res.ok) {
         setError(data?.error || "Video generation failed");
@@ -99,8 +121,8 @@ export default function ImageToVideoPage() {
         return;
       }
 
-      setJobId(data.id);
-      setStatus(data.status);
+      setJobId(data.id ?? null);
+      setStatus(data.status ?? "queued");
     } catch (e: any) {
       setError(e?.message || "Something went wrong");
       setLoading(false);
@@ -109,84 +131,236 @@ export default function ImageToVideoPage() {
 
   return (
     <main style={{ maxWidth: 760, margin: "0 auto", padding: 24 }}>
-      <h1 style={{ fontSize: 34, fontWeight: 750 }}>Image → Video</h1>
+      <h1 style={{ fontSize: 34, fontWeight: 750, marginBottom: 6 }}>
+        Image → Video
+      </h1>
 
-      {/* MAIN IMAGE */}
-      <div style={{ marginTop: 16 }}>
-        <label>Upload Main Image</label>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/*"
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-        />
-      </div>
+      <p style={{ opacity: 0.8, marginTop: 0 }}>
+        Upload a main image, optional reference images, and generate motion from your prompt.
+      </p>
 
-      {/* REFERENCE IMAGES */}
-      <div style={{ marginTop: 16 }}>
-        <label>Reference Images (optional)</label>
-        <input
-          ref={refFilesRef}
-          type="file"
-          accept="image/*"
-          multiple
-          onChange={(e) =>
-            setReferenceFiles(Array.from(e.target.files ?? []))
-          }
-        />
-      </div>
+      <div
+        style={{
+          marginTop: 16,
+          padding: 16,
+          border: "1px solid rgba(0,0,0,0.12)",
+          borderRadius: 12,
+          background: "#fff",
+        }}
+      >
+        <div>
+          <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
+            Upload Main Image
+          </label>
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          />
+          <div style={{ marginTop: 8, fontSize: 14, opacity: 0.8 }}>
+            {file?.name || "No file chosen"}
+          </div>
+        </div>
 
-      {/* PROMPT */}
-      <div style={{ marginTop: 16 }}>
-        <textarea
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Describe motion..."
-          rows={4}
-          style={{ width: "100%", padding: 12 }}
-        />
-      </div>
+        <div style={{ marginTop: 16 }}>
+          <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
+            Reference Images (optional)
+          </label>
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={(e) => setReferenceFiles(Array.from(e.target.files ?? []))}
+          />
+          <div style={{ marginTop: 8, fontSize: 14, opacity: 0.8 }}>
+            {referenceFiles.length > 0
+              ? `${referenceFiles.length} reference image(s) selected`
+              : "No reference images selected"}
+          </div>
+        </div>
 
-      {/* SETTINGS */}
-      <div style={{ marginTop: 16 }}>
-        <select value={seconds} onChange={(e) => setSeconds(e.target.value)}>
-          {SECOND_OPTIONS.map((s) => (
-            <option key={s}>{s}</option>
-          ))}
-        </select>
+        <div style={{ marginTop: 16 }}>
+          <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
+            Describe Motion
+          </label>
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="Describe motion..."
+            rows={4}
+            style={{
+              width: "100%",
+              padding: 12,
+              fontSize: 16,
+              borderRadius: 10,
+              border: "1px solid rgba(0,0,0,0.18)",
+              boxSizing: "border-box",
+            }}
+          />
+        </div>
 
-        <select value={size} onChange={(e) => setSize(e.target.value)}>
-          {SIZE_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* FIT MODE */}
-      <div style={{ marginTop: 16 }}>
-        <label>Fit Mode</label>
-        <select
-          value={fitMode}
-          onChange={(e) =>
-            setFitMode(e.target.value as "preserve" | "fill")
-          }
+        <div
+          style={{
+            display: "flex",
+            gap: 12,
+            flexWrap: "wrap",
+            marginTop: 12,
+            alignItems: "end",
+          }}
         >
-          <option value="preserve">Preserve (faces)</option>
-          <option value="fill">Fill (crop)</option>
-        </select>
+          <div>
+            <label style={{ display: "block", fontSize: 14, marginBottom: 6, opacity: 0.85 }}>
+              Model
+            </label>
+            <select
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              style={{
+                padding: "10px 12px",
+                fontSize: 16,
+                borderRadius: 10,
+                border: "1px solid rgba(0,0,0,0.2)",
+                background: "#fff",
+              }}
+            >
+              <option value="sora-2">sora-2</option>
+            </select>
+          </div>
+
+          <div>
+            <label style={{ display: "block", fontSize: 14, marginBottom: 6, opacity: 0.85 }}>
+              Video Length
+            </label>
+            <select
+              value={seconds}
+              onChange={(e) => setSeconds(e.target.value)}
+              style={{
+                padding: "10px 12px",
+                fontSize: 16,
+                borderRadius: 10,
+                border: "1px solid rgba(0,0,0,0.2)",
+                background: "#fff",
+              }}
+            >
+              {SECOND_OPTIONS.map((s) => (
+                <option key={s} value={s}>
+                  {s} seconds
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label style={{ display: "block", fontSize: 14, marginBottom: 6, opacity: 0.85 }}>
+              Size
+            </label>
+            <select
+              value={size}
+              onChange={(e) => setSize(e.target.value)}
+              style={{
+                padding: "10px 12px",
+                fontSize: 16,
+                borderRadius: 10,
+                border: "1px solid rgba(0,0,0,0.2)",
+                background: "#fff",
+              }}
+            >
+              {SIZE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 12 }}>
+          <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
+            Fit Mode
+          </label>
+          <select
+            value={fitMode}
+            onChange={(e) => setFitMode(e.target.value as "preserve" | "fill")}
+            style={{
+              padding: "10px 12px",
+              fontSize: 16,
+              borderRadius: 10,
+              border: "1px solid rgba(0,0,0,0.2)",
+              background: "#fff",
+            }}
+          >
+            <option value="preserve">Preserve (faces)</option>
+            <option value="fill">Fill (crop)</option>
+          </select>
+
+          <div style={{ marginTop: 8, fontSize: 13, opacity: 0.75 }}>
+            Preserve keeps the whole image. Fill crops to frame and is usually better when your crop is already strong.
+          </div>
+        </div>
+
+        <button
+          onClick={generate}
+          disabled={loading}
+          style={{
+            marginTop: 16,
+            padding: "10px 14px",
+            fontSize: 16,
+            borderRadius: 10,
+            border: "1px solid rgba(0,0,0,0.2)",
+            background: loading ? "rgba(0,0,0,0.08)" : "#111",
+            color: loading ? "#444" : "#fff",
+            cursor: loading ? "not-allowed" : "pointer",
+            fontWeight: 600,
+          }}
+        >
+          {loading ? "Generating..." : "Generate Video"}
+        </button>
+
+        <div style={{ marginTop: 16, fontSize: 16 }}>
+          <b>Status:</b> {status ?? "—"}
+        </div>
+
+        {error && (
+          <div
+            style={{
+              marginTop: 12,
+              padding: 12,
+              borderRadius: 10,
+              border: "1px solid rgba(220,38,38,0.25)",
+              background: "rgba(254,242,242,1)",
+              color: "#991b1b",
+            }}
+          >
+            {error}
+          </div>
+        )}
       </div>
 
-      <button onClick={generate} disabled={loading} style={{ marginTop: 16 }}>
-        {loading ? "Generating..." : "Generate"}
-      </button>
-
-      <div>Status: {status}</div>
-
-      {error && <div style={{ color: "red" }}>{error}</div>}
-
-      {videoUrl && <video src={videoUrl} controls style={{ width: "100%" }} />}
+      {videoUrl && (
+        <section
+          style={{
+            marginTop: 18,
+            padding: 16,
+            border: "1px solid rgba(0,0,0,0.12)",
+            borderRadius: 12,
+            background: "#fff",
+          }}
+        >
+          <h2 style={{ fontSize: 18, fontWeight: 750, marginTop: 0 }}>
+            Result
+          </h2>
+      
+          <video
+            controls
+            src={videoUrl}
+            style={{
+              width: "100%",
+              borderRadius: 10,
+              marginTop: 10,
+            }}
+          />
+        </section>
+      )}
     </main>
   );
 }
