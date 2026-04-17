@@ -106,42 +106,50 @@ export async function POST(req: Request) {
       );
 
       for (let i = 0; i < numOutputs; i++) {
-        const edited = await openai.images.edit({
-          model: "gpt-image-1.5",
-          image: openaiFiles,
-          prompt,
-          size,
-          input_fidelity: "high",
-        });
+  const variedPrompt =
+    prompt + ` slight variation in expression and framing, variation ${i + 1}`;
 
-        const resultB64 = edited.data?.[0]?.b64_json ?? null;
+  const edited = await openai.images.edit({
+    model: "gpt-image-1.5",
+    image: openaiFiles,
+    prompt: variedPrompt,
+    size,
+    input_fidelity: "high",
+  });
 
-        if (!resultB64) {
-          return jsonError("No image returned from OpenAI", 500);
-        }
+  const resultB64 = edited.data?.[0]?.b64_json ?? null;
 
-        const buffer = decodeBase64Image(resultB64);
-        const url = await uploadImageAndSaveRow(prompt, buffer);
-        urls.push(url);
-      }
+  if (!resultB64) {
+    return jsonError("No image returned from OpenAI", 500);
+  }
+
+  const buffer = decodeBase64Image(resultB64);
+  const url = await uploadImageAndSaveRow(prompt, buffer);
+  urls.push(url);
+}
+
     } else {
       for (let i = 0; i < numOutputs; i++) {
-        const generated = await openai.images.generate({
-          model: "gpt-image-1.5",
-          prompt,
-          size,
-        });
+  const variedPrompt =
+    prompt + ` slight variation in expression and framing, variation ${i + 1}`;
 
-        const resultB64 = generated.data?.[0]?.b64_json ?? null;
+  const generated = await openai.images.generate({
+    model: "gpt-image-1.5",
+    prompt: variedPrompt,
+    size,
+  });
 
-        if (!resultB64) {
-          return jsonError("No image returned from OpenAI", 500);
-        }
+  const resultB64 = generated.data?.[0]?.b64_json ?? null;
 
-        const buffer = decodeBase64Image(resultB64);
-        const url = await uploadImageAndSaveRow(prompt, buffer);
-        urls.push(url);
-      }
+  if (!resultB64) {
+    return jsonError("No image returned from OpenAI", 500);
+  }
+
+  const buffer = decodeBase64Image(resultB64);
+  const url = await uploadImageAndSaveRow(prompt, buffer);
+  urls.push(url);
+}
+
     }
 
     if (urls.length === 1) {
