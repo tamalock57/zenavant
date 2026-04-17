@@ -66,7 +66,9 @@ async function buildCompositeReference(
   const refWidth = Math.floor(width / refs.length);
 
   const refBuffers = await Promise.all(
-    refs.map((file) => normalizeImage(file, refWidth, stripHeight, fitMode))
+    refs.map((file) =>
+      normalizeImage(file, refWidth, stripHeight, fitMode)
+    )
   );
 
   const refComposites = refBuffers.map((buffer, index) => ({
@@ -94,16 +96,23 @@ export async function POST(req: Request) {
 
     const file = form.get("file") as File | null;
     const prompt = String(form.get("prompt") ?? "").trim();
-    const seconds = String(form.get("seconds") ?? "8").trim() as "4" | "8" | "12";
-    const size = String(form.get("size") ?? "1280x720").trim() as
+    const seconds = String(form.get("seconds") ?? "8") as "4" | "8" | "12";
+    const size = String(form.get("size") ?? "1280x720") as
       | "1280x720"
       | "720x1280";
-    const model = String(form.get("model") ?? "sora-2").trim();
-    const fitMode = String(form.get("fitMode") ?? "preserve").trim() as
+    const model = String(form.get("model") ?? "sora-2");
+    const fitMode = String(form.get("fitMode") ?? "preserve") as
       | "preserve"
       | "fill";
 
-    const referenceFiles = (form.getAll("references") as File[]).filter(Boolean);
+    const numOutputs = Math.min(
+      3,
+      Math.max(1, Number(form.get("numOutputs") ?? 1))
+    );
+
+    const referenceFiles = (form.getAll("references") as File[]).filter(
+      Boolean
+    );
 
     if (!process.env.OPENAI_API_KEY) {
       return jsonError("Missing OPENAI_API_KEY on server", 500);
@@ -111,18 +120,6 @@ export async function POST(req: Request) {
 
     if (!file) return jsonError("Missing main image");
     if (!prompt) return jsonError("Missing prompt");
-
-    if (!["4", "8", "12"].includes(seconds)) {
-      return jsonError("Seconds must be 4, 8, or 12");
-    }
-
-    if (!["1280x720", "720x1280"].includes(size)) {
-      return jsonError("Size must be 1280x720 or 720x1280");
-    }
-
-    if (!["preserve", "fill"].includes(fitMode)) {
-      return jsonError("fitMode must be preserve or fill");
-    }
 
     const compositeBuffer = await buildCompositeReference(
       file,
@@ -134,20 +131,36 @@ export async function POST(req: Request) {
     const base64 = compositeBuffer.toString("base64");
     const dataUrl = `data:image/png;base64,${base64}`;
 
-    const job = await openai.videos.create({
-      model,
-      prompt,
-      seconds,
-      size,
-      input_reference: {
-        image_url: dataUrl,
-      } as any,
-    } as any);
+    // 🔥 MULTI OUTPUT JOB CREATION
+    const jobs = await Promise.all(
+      Array.from({ length: numOutputs }).map(() =>
+        openai.videos.create({
+          model,
+          prompt,
+          seconds,
+          size,
+          input_reference: {
+            image_url: dataUrl,
+          } as any,
+        } as any)
+      )
+    );
+
+    const ids = jobs.map((job) => job.id);
+    const first = jobs[0];
+
+    if (ids.length === 1) {
+      return Response.json({
+        id: first.id,
+        status: first.status,
+        progress: first.progress ?? 0,
+      });
+    }
 
     return Response.json({
-      id: job.id,
-      status: job.status,
-      progress: job.progress ?? 0,
+      ids,
+      status: first.status,
+      progress: first.progress ?? 0,
     });
   } catch (err: any) {
     console.error("POST image-to-video error:", err);
@@ -182,22 +195,11 @@ export async function GET(req: Request) {
 
     const storagePath = `videos/image-to-video-${id}.mp4`;
 
-    const { data: existingRow, error: existingError } = await supabaseAdmin
+    const { data: existingRow } = await supabaseAdmin
       .from("media")
-      .select("id, url, storage_path")
-      .eq("type", "image_to_video")
+      .select("url")
       .eq("storage_path", storagePath)
       .maybeSingle();
-
-    if (existingError) {
-      return Response.json(
-        {
-          error: "Failed to check existing video",
-          details: existingError.message,
-        },
-        { status: 500 }
-      );
-    }
 
     if (existingRow?.url) {
       return Response.json({
@@ -217,70 +219,34 @@ export async function GET(req: Request) {
     );
 
     if (!contentRes.ok) {
-      const text = await contentRes.text().catch(() => "");
-      return Response.json(
-        {
-          error: "Failed to download video content",
-          details: text,
-        },
-        { status: 500 }
-      );
+      const text = await contentRes.text();
+      return jsonError("Failed to download video content", 500);
     }
 
     const buf = await contentRes.arrayBuffer();
 
-    const upload = await supabaseAdmin.storage.from("media").upload(
-      storagePath,
-      toBytes(buf),
-      {
+    await supabaseAdmin.storage
+      .from("media")
+      .upload(storagePath, toBytes(buf), {
         contentType: "video/mp4",
         upsert: true,
-      }
-    );
+      });
 
-    if (upload.error) {
-      return Response.json(
-        {
-          error: "Supabase upload failed",
-          details: upload.error.message,
-        },
-        { status: 500 }
-      );
-    }
+    const { data } = supabaseAdmin.storage
+      .from("media")
+      .getPublicUrl(storagePath);
 
-    const { data } = supabaseAdmin.storage.from("media").getPublicUrl(storagePath);
     const url = data.publicUrl;
 
-    if (!url) {
-      return Response.json(
-        { error: "Failed to get public URL" },
-        { status: 500 }
-      );
-    }
-
-    const { error: upsertError } = await supabaseAdmin
-      .from("media")
-      .upsert(
-        {
-          type: "image_to_video",
-          prompt: job.prompt ?? "",
-          url,
-          storage_path: storagePath,
-        },
-        {
-          onConflict: "storage_path",
-        }
-      );
-
-    if (upsertError) {
-      return Response.json(
-        {
-          error: "DB upsert failed",
-          details: upsertError.message,
-        },
-        { status: 500 }
-      );
-    }
+    await supabaseAdmin.from("media").upsert(
+      {
+        type: "image_to_video",
+        prompt: job.prompt ?? "",
+        url,
+        storage_path: storagePath,
+      },
+      { onConflict: "storage_path" }
+    );
 
     return Response.json({
       status: "completed",

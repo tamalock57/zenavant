@@ -9,6 +9,16 @@ const SIZE_OPTIONS = [
 
 const SECOND_OPTIONS = ["4", "8", "12"];
 
+type JobStatus = "queued" | "in_progress" | "completed" | "failed";
+
+type VideoResult = {
+  jobId: string;
+  status: JobStatus | null;
+  progress: number;
+  videoUrl: string | null;
+  error: string | null;
+};
+
 export default function ImageToVideoPage() {
   const handled = useRef(false);
 
@@ -23,12 +33,21 @@ export default function ImageToVideoPage() {
   const [size, setSize] = useState("1280x720");
   const [model, setModel] = useState("sora-2");
   const [fitMode, setFitMode] = useState<"preserve" | "fill">("preserve");
+  const [numOutputs, setNumOutputs] = useState(1);
 
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [jobIds, setJobIds] = useState<string[]>([]);
+  const [results, setResults] = useState<VideoResult[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  const pollTimer = useRef<number | null>(null);
+
+  function stopPolling() {
+    if (pollTimer.current) {
+      window.clearInterval(pollTimer.current);
+      pollTimer.current = null;
+    }
+  }
 
   function updateReferenceSlot(index: number, nextFile: File | null) {
     setReferenceSlots((prev) => {
@@ -53,59 +72,88 @@ export default function ImageToVideoPage() {
   }
 
   useEffect(() => {
-    if (!jobId) return;
-    if (status === "completed" || status === "failed") return;
+    return () => stopPolling();
+  }, []);
 
-    const timer = setInterval(async () => {
-      try {
-        const res = await fetch(
-          `/api/image-to-video?id=${encodeURIComponent(jobId)}`,
-          { cache: "no-store" }
+  async function pollOne(id: string) {
+    const res = await fetch(
+      `/api/image-to-video?id=${encodeURIComponent(id)}`,
+      { cache: "no-store" }
+    );
+
+    const text = await res.text();
+    let data: any = {};
+
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { error: text || "Invalid server response" };
+    }
+
+    if (!res.ok) {
+      throw new Error(data?.error || "Failed to refresh status");
+    }
+
+    return data;
+  }
+
+  async function pollAll(ids: string[]) {
+    try {
+      const all = await Promise.all(
+        ids.map(async (id) => {
+          const data = await pollOne(id);
+          return {
+            jobId: id,
+            status: (data.status ?? null) as JobStatus | null,
+            progress: typeof data.progress === "number" ? data.progress : 0,
+            videoUrl: data.downloadUrl || null,
+            error:
+              data.status === "failed"
+                ? data.error || "Video generation failed"
+                : null,
+          } satisfies VideoResult;
+        })
+      );
+
+      setResults(all);
+
+      const hasFailure = all.some((item) => item.status === "failed");
+      const allFinished =
+        all.length > 0 &&
+        all.every(
+          (item) =>
+            item.status === "completed" || item.status === "failed"
         );
 
-        const text = await res.text();
-        let data: any = {};
+      if (hasFailure && !handled.current) {
+        const firstFailure =
+          all.find((item) => item.error)?.error ||
+          "One or more videos failed";
+        setError(firstFailure);
+      }
 
-        try {
-          data = text ? JSON.parse(text) : {};
-        } catch {
-          data = { error: text || "Invalid server response" };
-        }
-
-        if (!res.ok) {
-          setError(data?.error || "Failed to refresh status");
-          setLoading(false);
-          return;
-        }
-
-        setStatus(data.status ?? null);
-
-        if (data.status === "completed" && !handled.current) {
-          handled.current = true;
-          setVideoUrl(data.downloadUrl || null);
-          setLoading(false);
-        }
-
-        if (data.status === "failed") {
-          setError(data?.error || "Video generation failed");
-          setLoading(false);
-        }
-      } catch (e: any) {
-        setError(e?.message || "Something went wrong");
+      if (allFinished) {
+        handled.current = true;
+        stopPolling();
         setLoading(false);
       }
-    }, 2000);
-
-    return () => clearInterval(timer);
-  }, [jobId, status]);
+    } catch (e: any) {
+      if (!handled.current) {
+        setError(e?.message || "Something went wrong");
+      }
+      stopPolling();
+      setLoading(false);
+    }
+  }
 
   async function generate() {
     handled.current = false;
+    stopPolling();
+
     setLoading(true);
     setError(null);
-    setVideoUrl(null);
-    setJobId(null);
-    setStatus(null);
+    setJobIds([]);
+    setResults([]);
 
     try {
       if (!file) {
@@ -132,6 +180,7 @@ export default function ImageToVideoPage() {
       fd.append("size", size);
       fd.append("model", model);
       fd.append("fitMode", fitMode);
+      fd.append("numOutputs", String(numOutputs));
 
       const res = await fetch("/api/image-to-video", {
         method: "POST",
@@ -153,8 +202,32 @@ export default function ImageToVideoPage() {
         return;
       }
 
-      setJobId(data.id ?? null);
-      setStatus(data.status ?? "queued");
+      const ids: string[] = Array.isArray(data?.ids)
+        ? data.ids
+        : data?.id
+        ? [data.id]
+        : [];
+
+      if (ids.length === 0) {
+        setError("No job IDs returned");
+        setLoading(false);
+        return;
+      }
+
+      setJobIds(ids);
+      setResults(
+        ids.map((id) => ({
+          jobId: id,
+          status: (data.status ?? "queued") as JobStatus,
+          progress: typeof data.progress === "number" ? data.progress : 0,
+          videoUrl: null,
+          error: null,
+        }))
+      );
+
+      pollTimer.current = window.setInterval(() => {
+        pollAll(ids);
+      }, 2000) as unknown as number;
     } catch (e: any) {
       setError(e?.message || "Something went wrong");
       setLoading(false);
@@ -405,7 +478,9 @@ export default function ImageToVideoPage() {
           </label>
           <select
             value={fitMode}
-            onChange={(e) => setFitMode(e.target.value as "preserve" | "fill")}
+            onChange={(e) =>
+              setFitMode(e.target.value as "preserve" | "fill")
+            }
             style={{
               padding: "10px 12px",
               fontSize: 16,
@@ -417,10 +492,35 @@ export default function ImageToVideoPage() {
             <option value="preserve">Preserve (faces)</option>
             <option value="fill">Fill (crop)</option>
           </select>
-
           <div style={{ marginTop: 8, fontSize: 13, opacity: 0.75 }}>
             Preserve keeps the whole image. Fill crops to frame and is usually
             better when your crop is already strong.
+          </div>
+        </div>
+
+        <div style={{ marginTop: 12 }}>
+          <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
+            Number of Outputs
+          </label>
+          <select
+            value={numOutputs}
+            onChange={(e) => setNumOutputs(Number(e.target.value))}
+            style={{
+              padding: "10px 12px",
+              fontSize: 16,
+              borderRadius: 10,
+              border: "1px solid rgba(0,0,0,0.2)",
+              background: "#fff",
+            }}
+          >
+            <option value={1}>1 (Fastest)</option>
+            <option value={2}>2 (Recommended)</option>
+            <option value={3}>3 (More variety)</option>
+          </select>
+
+          <div style={{ marginTop: 8, fontSize: 13, opacity: 0.75 }}>
+            Generates multiple versions so you can pick the best take. Uses more
+            credits.
           </div>
         </div>
 
@@ -448,9 +548,44 @@ export default function ImageToVideoPage() {
           return.
         </div>
 
-        <div style={{ marginTop: 16, fontSize: 16 }}>
-          <b>Status:</b> {status ?? "—"}
-        </div>
+        {jobIds.length > 0 && (
+          <div style={{ marginTop: 12, fontSize: 14, opacity: 0.85 }}>
+            <b>Jobs:</b> {jobIds.length}
+          </div>
+        )}
+
+        {results.length > 0 && (
+          <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+            {results.map((item, index) => (
+              <div
+                key={item.jobId}
+                style={{
+                  padding: 12,
+                  border: "1px solid rgba(0,0,0,0.08)",
+                  borderRadius: 10,
+                  background: "#fafafa",
+                }}
+              >
+                <div style={{ fontSize: 14 }}>
+                  <b>Output {index + 1}</b>
+                </div>
+                <div style={{ marginTop: 4, fontSize: 13, opacity: 0.85 }}>
+                  <div>
+                    <b>Status:</b> {item.status ?? "-"}
+                  </div>
+                  <div>
+                    <b>Progress:</b> {item.progress}%
+                  </div>
+                  {item.error && (
+                    <div style={{ color: "#991b1b", marginTop: 4 }}>
+                      {item.error}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {error && (
           <div
@@ -468,7 +603,7 @@ export default function ImageToVideoPage() {
         )}
       </div>
 
-      {videoUrl && (
+      {results.some((item) => item.videoUrl) && (
         <section
           style={{
             marginTop: 18,
@@ -479,18 +614,39 @@ export default function ImageToVideoPage() {
           }}
         >
           <h2 style={{ fontSize: 18, fontWeight: 750, marginTop: 0 }}>
-            Result
+            Results
           </h2>
 
-          <video
-            controls
-            src={videoUrl}
+          <div
             style={{
-              width: "100%",
-              borderRadius: 10,
+              display: "grid",
+              gridTemplateColumns:
+                results.filter((item) => item.videoUrl).length > 1
+                  ? "repeat(auto-fit, minmax(260px, 1fr))"
+                  : "1fr",
+              gap: 16,
               marginTop: 10,
             }}
-          />
+          >
+            {results.map((item, index) =>
+              item.videoUrl ? (
+                <div key={`${item.jobId}-${index}`}>
+                  <video
+                    controls
+                    src={item.videoUrl}
+                    style={{
+                      width: "100%",
+                      borderRadius: 10,
+                      marginTop: 10,
+                    }}
+                  />
+                  <div style={{ marginTop: 8, fontSize: 13, opacity: 0.75 }}>
+                    Output {index + 1}
+                  </div>
+                </div>
+              ) : null
+            )}
+          </div>
         </section>
       )}
     </main>
