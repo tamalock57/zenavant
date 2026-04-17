@@ -11,9 +11,12 @@ const SIZE_OPTIONS = [
 export default function ImageMakerPage() {
   const [prompt, setPrompt] = useState("");
   const [size, setSize] = useState("1024x1024");
+  const [numOutputs, setNumOutputs] = useState(1);
+
   const [mainImage, setMainImage] = useState<File | null>(null);
   const [referenceImages, setReferenceImages] = useState<File[]>([]);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
+
+  const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,7 +34,7 @@ export default function ImageMakerPage() {
   async function generate() {
     setLoading(true);
     setError(null);
-    setImageUrl(null);
+    setImageUrls([]);
 
     try {
       if (!prompt.trim()) {
@@ -43,6 +46,7 @@ export default function ImageMakerPage() {
       const fd = new FormData();
       fd.append("prompt", prompt);
       fd.append("size", size);
+      fd.append("numOutputs", String(numOutputs));
 
       if (mainImage) {
         fd.append("mainImage", mainImage);
@@ -63,7 +67,13 @@ export default function ImageMakerPage() {
         throw new Error(data?.error || "Image generation failed");
       }
 
-      setImageUrl(data.url);
+      if (Array.isArray(data?.urls) && data.urls.length > 0) {
+        setImageUrls(data.urls);
+      } else if (data?.url) {
+        setImageUrls([data.url]);
+      } else {
+        throw new Error("No image URLs returned.");
+      }
     } catch (e: any) {
       setError(e?.message || "Something went wrong");
     } finally {
@@ -131,6 +141,31 @@ export default function ImageMakerPage() {
               </option>
             ))}
           </select>
+        </div>
+
+        <div style={{ marginTop: 12 }}>
+          <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
+            Number of Outputs
+          </label>
+          <select
+            value={numOutputs}
+            onChange={(e) => setNumOutputs(Number(e.target.value))}
+            style={{
+              padding: "10px 12px",
+              fontSize: 16,
+              borderRadius: 10,
+              border: "1px solid rgba(0,0,0,0.2)",
+              background: "#fff",
+            }}
+          >
+            <option value={1}>1 (Fastest)</option>
+            <option value={2}>2</option>
+            <option value={3}>3</option>
+          </select>
+
+          <div style={{ marginTop: 8, fontSize: 13, opacity: 0.75 }}>
+            More outputs give you more variations, but use more credits.
+          </div>
         </div>
 
         <div style={{ marginTop: 16 }}>
@@ -255,7 +290,7 @@ export default function ImageMakerPage() {
         )}
       </div>
 
-      {imageUrl && (
+      {imageUrls.length > 0 && (
         <section
           style={{
             marginTop: 18,
@@ -266,17 +301,34 @@ export default function ImageMakerPage() {
           }}
         >
           <h2 style={{ fontSize: 18, fontWeight: 750, marginTop: 0 }}>
-            Result
+            Results
           </h2>
-          <img
-            src={imageUrl}
-            alt="Generated result"
+
+          <div
             style={{
-              width: "100%",
-              borderRadius: 10,
+              display: "grid",
+              gridTemplateColumns: imageUrls.length > 1 ? "repeat(auto-fit, minmax(220px, 1fr))" : "1fr",
+              gap: 16,
               marginTop: 10,
             }}
-          />
+          >
+            {imageUrls.map((url, index) => (
+              <div key={`${url}-${index}`}>
+                <img
+                  src={url}
+                  alt={`Generated result ${index + 1}`}
+                  style={{
+                    width: "100%",
+                    borderRadius: 10,
+                    display: "block",
+                  }}
+                />
+                <div style={{ marginTop: 8, fontSize: 13, opacity: 0.7 }}>
+                  Output {index + 1}
+                </div>
+              </div>
+            ))}
+          </div>
         </section>
       )}
     </main>
