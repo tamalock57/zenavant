@@ -6,26 +6,30 @@ import { supabase } from "@/lib/supabaseClient";
 
 type JobStatus = "queued" | "in_progress" | "completed" | "failed";
 
+type VideoResult = {
+  jobId: string;
+  status: JobStatus | null;
+  progress: number;
+  videoUrl: string | null;
+  error: string | null;
+};
+
 export default function VideoMakerPage() {
   const router = useRouter();
 
   const [prompt, setPrompt] = useState("");
   const [size, setSize] = useState("1280x720");
   const [seconds, setSeconds] = useState("8");
+  const [numOutputs, setNumOutputs] = useState(1);
 
   const [loading, setLoading] = useState(false);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [status, setStatus] = useState<JobStatus | null>(null);
-  const [progress, setProgress] = useState<number>(0);
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [jobIds, setJobIds] = useState<string[]>([]);
+  const [results, setResults] = useState<VideoResult[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const pollTimer = useRef<number | null>(null);
-  const hasHandledComplete = useRef(false);
-
   const canSubmit = prompt.trim().length >= 5;
 
-  // Protect page
   useEffect(() => {
     async function checkUser() {
       const {
@@ -40,7 +44,6 @@ export default function VideoMakerPage() {
     checkUser();
   }, [router]);
 
-  // Restore prompt passed from another page
   useEffect(() => {
     const saved = localStorage.getItem("zenavant_prompt");
     if (saved) {
@@ -49,7 +52,6 @@ export default function VideoMakerPage() {
     }
   }, []);
 
-  // Cleanup polling on unmount
   useEffect(() => {
     return () => stopPolling();
   }, []);
@@ -61,52 +63,64 @@ export default function VideoMakerPage() {
     }
   }
 
-  // keep the rest of your existing Video Maker code below this line
+  async function pollOne(id: string) {
+    const res = await fetch(`/api/video-maker?id=${encodeURIComponent(id)}`, {
+      cache: "no-store",
+    });
 
-  async function poll(id: string) {
+    const text = await res.text();
+    let data: any = {};
+
     try {
-      const res = await fetch(`/api/video-maker?id=${encodeURIComponent(id)}`, {
-        cache: "no-store",
-      });
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { error: text || "Invalid server response" };
+    }
 
-      const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data?.error || "Status check failed");
+    }
 
-      if (!res.ok) {
-        if (!hasHandledComplete.current) {
-          setError(data?.error || "Status check failed");
-        }
-        stopPolling();
-        setLoading(false);
-        return;
+    return data;
+  }
+
+  async function pollAll(ids: string[]) {
+    try {
+      const all = await Promise.all(
+        ids.map(async (id) => {
+          const data = await pollOne(id);
+          return {
+            jobId: id,
+            status: (data.status ?? null) as JobStatus | null,
+            progress: typeof data.progress === "number" ? data.progress : 0,
+            videoUrl: data.downloadUrl || null,
+            error: data.status === "failed" ? data.error || "Video failed" : null,
+          } satisfies VideoResult;
+        })
+      );
+
+      setResults(all);
+
+      const hasFailure = all.some((item) => item.status === "failed");
+      const allCompleted = all.length > 0 && all.every((item) => item.status === "completed");
+      const allFinished = all.length > 0 && all.every((item) =>
+        item.status === "completed" || item.status === "failed"
+      );
+
+      if (hasFailure) {
+        const firstFailure = all.find((item) => item.error)?.error || "One or more videos failed";
+        setError(firstFailure);
       }
 
-      setStatus(data.status);
-      setProgress(typeof data.progress === "number" ? data.progress : 0);
-
-      if (data.status === "completed") {
-        if (!hasHandledComplete.current) {
-          hasHandledComplete.current = true;
-          setVideoUrl(data.downloadUrl || null);
-          setStatus("completed");
-          setProgress(100);
-          setLoading(false);
+      if (allFinished) {
+        stopPolling();
+        setLoading(false);
+        if (allCompleted) {
           setPrompt("");
         }
-
-        stopPolling();
-        return;
-      }
-
-      if (data.status === "failed") {
-        setError(data?.error || "Video failed");
-        stopPolling();
-        setLoading(false);
-        return;
       }
     } catch (e: any) {
-      if (!hasHandledComplete.current) {
-        setError(e?.message ?? "Polling failed");
-      }
+      setError(e?.message ?? "Polling failed");
       stopPolling();
       setLoading(false);
     }
@@ -116,23 +130,31 @@ export default function VideoMakerPage() {
     if (!canSubmit) return;
 
     stopPolling();
-    hasHandledComplete.current = false;
-
     setLoading(true);
     setError(null);
-    setVideoUrl(null);
-    setJobId(null);
-    setStatus(null);
-    setProgress(0);
+    setJobIds([]);
+    setResults([]);
 
     try {
       const res = await fetch("/api/video-maker", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, size, seconds }),
+        body: JSON.stringify({
+          prompt,
+          size,
+          seconds,
+          numOutputs,
+        }),
       });
 
-      const data = await res.json();
+      const text = await res.text();
+      let data: any = {};
+
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = { error: text || "Invalid server response" };
+      }
 
       if (!res.ok) {
         setError(data?.error || "Request failed");
@@ -140,12 +162,31 @@ export default function VideoMakerPage() {
         return;
       }
 
-      setJobId(data.id);
-      setStatus(data.status);
-      setProgress(typeof data.progress === "number" ? data.progress : 0);
+      const ids: string[] = Array.isArray(data?.ids)
+        ? data.ids
+        : data?.id
+        ? [data.id]
+        : [];
+
+      if (ids.length === 0) {
+        setError("No job IDs returned");
+        setLoading(false);
+        return;
+      }
+
+      setJobIds(ids);
+      setResults(
+        ids.map((id) => ({
+          jobId: id,
+          status: (data.status ?? "queued") as JobStatus,
+          progress: typeof data.progress === "number" ? data.progress : 0,
+          videoUrl: null,
+          error: null,
+        }))
+      );
 
       pollTimer.current = window.setInterval(() => {
-        poll(data.id);
+        pollAll(ids);
       }, 2000) as unknown as number;
     } catch (e: any) {
       setError(e?.message ?? "Something went wrong");
@@ -172,9 +213,7 @@ export default function VideoMakerPage() {
           background: "#fff",
         }}
       >
-        <label
-          style={{ display: "block", fontWeight: 650, marginBottom: 8 }}
-        >
+        <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
           Prompt
         </label>
 
@@ -232,33 +271,89 @@ export default function VideoMakerPage() {
             <option value="8">8</option>
             <option value="12">12</option>
           </select>
+        </div>
 
-          <button
-            onClick={generate}
-            disabled={loading || !canSubmit}
+        <div style={{ marginTop: 12 }}>
+          <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
+            Number of Outputs
+          </label>
+          <select
+            value={numOutputs}
+            onChange={(e) => setNumOutputs(Number(e.target.value))}
             style={{
-              marginLeft: "auto",
-              padding: "10px 14px",
+              padding: "10px 12px",
               fontSize: 16,
               borderRadius: 10,
               border: "1px solid rgba(0,0,0,0.2)",
-              background: loading || !canSubmit ? "rgba(0,0,0,0.08)" : "#111",
-              color: loading || !canSubmit ? "#444" : "#fff",
-              cursor: loading || !canSubmit ? "not-allowed" : "pointer",
+              background: "#fff",
             }}
           >
-            {loading ? "Generating..." : "Generate video"}
-          </button>
+            <option value={1}>1 (Fastest)</option>
+            <option value={2}>2</option>
+            <option value={3}>3</option>
+          </select>
+
+          <div style={{ marginTop: 8, fontSize: 13, opacity: 0.75 }}>
+            More outputs give you more variations, but use more credits.
+          </div>
         </div>
 
-        {(jobId || status) && (
+        <button
+          onClick={generate}
+          disabled={loading || !canSubmit}
+          style={{
+            marginTop: 16,
+            padding: "10px 14px",
+            fontSize: 16,
+            borderRadius: 10,
+            border: "1px solid rgba(0,0,0,0.2)",
+            background: loading || !canSubmit ? "rgba(0,0,0,0.08)" : "#111",
+            color: loading || !canSubmit ? "#444" : "#fff",
+            cursor: loading || !canSubmit ? "not-allowed" : "pointer",
+            fontWeight: 600,
+          }}
+        >
+          {loading ? "Generating..." : "Generate Video"}
+        </button>
+
+        <div style={{ marginTop: 10, fontSize: 13, opacity: 0.75 }}>
+          Keep this page open while generating. Closing or refreshing the page can interrupt the visible progress and may cause errors when you return.
+        </div>
+
+        {jobIds.length > 0 && (
           <div style={{ marginTop: 12, fontSize: 14, opacity: 0.85 }}>
-            <div>
-              <b>Status:</b> {status ?? "-"}
-            </div>
-            <div>
-              <b>Progress:</b> {progress}%
-            </div>
+            <b>Jobs:</b> {jobIds.length}
+          </div>
+        )}
+
+        {results.length > 0 && (
+          <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+            {results.map((item, index) => (
+              <div
+                key={item.jobId}
+                style={{
+                  padding: 12,
+                  border: "1px solid rgba(0,0,0,0.08)",
+                  borderRadius: 10,
+                  background: "#fafafa",
+                }}
+              >
+                <div style={{ fontSize: 14 }}>
+                  <b>Output {index + 1}</b>
+                </div>
+                <div style={{ marginTop: 4, fontSize: 13, opacity: 0.85 }}>
+                  <div>
+                    <b>Status:</b> {item.status ?? "-"}
+                  </div>
+                  <div>
+                    <b>Progress:</b> {item.progress}%
+                  </div>
+                  {item.error && (
+                    <div style={{ color: "#991b1b", marginTop: 4 }}>{item.error}</div>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
@@ -278,7 +373,7 @@ export default function VideoMakerPage() {
         )}
       </div>
 
-      {videoUrl && (
+      {results.some((item) => item.videoUrl) && (
         <section
           style={{
             marginTop: 18,
@@ -289,24 +384,43 @@ export default function VideoMakerPage() {
           }}
         >
           <h2 style={{ fontSize: 18, fontWeight: 750, marginTop: 0 }}>
-            Result
+            Results
           </h2>
 
-          <video
-            controls
-            src={videoUrl}
+          <div
             style={{
+              display: "grid",
+              gridTemplateColumns:
+                results.filter((item) => item.videoUrl).length > 1
+                  ? "repeat(auto-fit, minmax(260px, 1fr))"
+                  : "1fr",
+              gap: 16,
               marginTop: 10,
-              width: "100%",
-              height: "auto",
-              borderRadius: 10,
             }}
-          />
-
-          <div style={{ marginTop: 10 }}>
-            <a href={videoUrl} download style={{ fontSize: 14 }}>
-              Download video
-            </a>
+          >
+            {results.map((item, index) =>
+              item.videoUrl ? (
+                <div key={`${item.jobId}-${index}`}>
+                  <video
+                    controls
+                    src={item.videoUrl}
+                    style={{
+                      width: "100%",
+                      height: "auto",
+                      borderRadius: 10,
+                    }}
+                  />
+                  <div style={{ marginTop: 8, fontSize: 13, opacity: 0.75 }}>
+                    Output {index + 1}
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <a href={item.videoUrl} download style={{ fontSize: 14 }}>
+                      Download video
+                    </a>
+                  </div>
+                </div>
+              ) : null
+            )}
           </div>
         </section>
       )}

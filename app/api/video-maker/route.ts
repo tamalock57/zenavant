@@ -2,49 +2,93 @@ import OpenAI from "openai";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+function jsonError(message: string, status = 400, details?: string) {
+  return Response.json(
+    details ? { error: message, details } : { error: message },
+    { status }
+  );
+}
+
+function toBytes(buf: ArrayBuffer) {
+  return new Uint8Array(buf);
+}
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
+
     const prompt = (body?.prompt ?? "").toString().trim();
-    const size = (body?.size ?? "1280x720").toString();
+    const size = (body?.size ?? "1280x720").toString() as
+      | "1280x720"
+      | "720x1280"
+      | "1792x1024"
+      | "1024x1792";
     const seconds = (body?.seconds ?? "4").toString() as "4" | "8" | "12";
+    const numOutputs = Math.min(
+      3,
+      Math.max(1, Number(body?.numOutputs ?? 1))
+    );
 
     if (!process.env.OPENAI_API_KEY) {
-      return Response.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
+      return jsonError("Missing OPENAI_API_KEY", 500);
     }
 
     if (prompt.length < 5) {
-      return Response.json(
-        { error: "Missing or too-short prompt" },
-        { status: 400 }
+      return jsonError("Missing or too-short prompt", 400);
+    }
+
+    if (!["4", "8", "12"].includes(seconds)) {
+      return jsonError("Seconds must be 4, 8, or 12", 400);
+    }
+
+    if (
+      !["1280x720", "720x1280", "1792x1024", "1024x1792"].includes(size)
+    ) {
+      return jsonError(
+        "Size must be 1280x720, 720x1280, 1792x1024, or 1024x1792",
+        400
       );
     }
 
-    const client = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
+    const jobs = await Promise.all(
+      Array.from({ length: numOutputs }).map(() =>
+        client.videos.create({
+          model: "sora-2",
+          prompt,
+          size,
+          seconds,
+        })
+      )
+    );
 
-    const job = await client.videos.create({
-      model: "sora-2",
-      prompt,
-      size,
-      seconds,
-    });
+    const ids = jobs.map((job) => job.id);
+    const first = jobs[0];
+
+    if (ids.length === 1) {
+      return Response.json({
+        id: first.id,
+        status: first.status,
+        progress: first.progress ?? 0,
+      });
+    }
 
     return Response.json({
-      id: job.id,
-      status: job.status,
-      progress: job.progress ?? 0,
+      ids,
+      status: first.status,
+      progress: first.progress ?? 0,
     });
   } catch (error: any) {
     console.error("VIDEO POST ERROR:", error);
-    return Response.json(
-      {
-        error: "Video job creation failed",
-        details: error?.message ?? String(error),
-      },
-      { status: 500 }
+    return jsonError(
+      "Video job creation failed",
+      500,
+      error?.message ?? String(error)
     );
   }
 }
@@ -55,30 +99,27 @@ export async function GET(req: Request) {
     const id = url.searchParams.get("id");
 
     if (!id) {
-      return Response.json({ error: "Missing id" }, { status: 400 });
+      return jsonError("Missing id", 400);
     }
 
     if (!process.env.OPENAI_API_KEY) {
-      return Response.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
+      return jsonError("Missing OPENAI_API_KEY", 500);
     }
-
-    const client = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
 
     const job = await client.videos.retrieve(id);
 
-    if (job.status !== "completed") {
-      if (job.status === "failed") {
-        return Response.json(
-          {
-            status: "failed",
-            error: job.error?.message ?? "Video generation failed",
-          },
-          { status: 500 }
-        );
-      }
+    if (job.status === "failed") {
+      return Response.json(
+        {
+          status: "failed",
+          progress: job.progress ?? 0,
+          error: job.error?.message ?? "Video generation failed",
+        },
+        { status: 500 }
+      );
+    }
 
+    if (job.status !== "completed") {
       return Response.json({
         status: job.status,
         progress: job.progress ?? 0,
@@ -87,7 +128,6 @@ export async function GET(req: Request) {
 
     const storagePath = `videos/${id}.mp4`;
 
-    // 1) Fast path: already saved
     const { data: existingRow, error: existingError } = await supabaseAdmin
       .from("media")
       .select("id, url, storage_path")
@@ -96,12 +136,10 @@ export async function GET(req: Request) {
       .maybeSingle();
 
     if (existingError) {
-      return Response.json(
-        {
-          error: "Failed to check existing video",
-          details: existingError.message,
-        },
-        { status: 500 }
+      return jsonError(
+        "Failed to check existing video",
+        500,
+        existingError.message
       );
     }
 
@@ -113,29 +151,24 @@ export async function GET(req: Request) {
       });
     }
 
-    // 2) Download completed video content from OpenAI
-    const contentRes = await fetch(`https://api.openai.com/v1/videos/${id}/content`, {
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-      },
-      cache: "no-store",
-    });
+    const contentRes = await fetch(
+      `https://api.openai.com/v1/videos/${id}/content`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+        cache: "no-store",
+      }
+    );
 
     if (!contentRes.ok) {
-      const text = await contentRes.text();
-      return Response.json(
-        {
-          error: "Failed to download video content",
-          details: text,
-        },
-        { status: 500 }
-      );
+      const text = await contentRes.text().catch(() => "");
+      return jsonError("Failed to download video content", 500, text);
     }
 
     const arrayBuffer = await contentRes.arrayBuffer();
-    const bytes = new Uint8Array(arrayBuffer);
+    const bytes = toBytes(arrayBuffer);
 
-    // 3) Upload file to Supabase storage
     const { error: uploadError } = await supabaseAdmin.storage
       .from("media")
       .upload(storagePath, bytes, {
@@ -144,13 +177,7 @@ export async function GET(req: Request) {
       });
 
     if (uploadError) {
-      return Response.json(
-        {
-          error: "Supabase upload failed",
-          details: uploadError.message,
-        },
-        { status: 500 }
-      );
+      return jsonError("Supabase upload failed", 500, uploadError.message);
     }
 
     const {
@@ -158,55 +185,25 @@ export async function GET(req: Request) {
     } = supabaseAdmin.storage.from("media").getPublicUrl(storagePath);
 
     if (!publicUrl) {
-      return Response.json(
-        { error: "Failed to get public URL" },
-        { status: 500 }
-      );
+      return jsonError("Failed to get public URL", 500);
     }
 
-    // 4) Check AGAIN after upload in case another request inserted first
-    const { data: existingAfterUpload, error: existingAfterUploadError } =
-      await supabaseAdmin
-        .from("media")
-        .select("id, url, storage_path")
-        .eq("type", "video")
-        .eq("storage_path", storagePath)
-        .maybeSingle();
-
-    if (existingAfterUploadError) {
-      return Response.json(
+    const { error: upsertError } = await supabaseAdmin
+      .from("media")
+      .upsert(
         {
-          error: "Failed to re-check existing video",
-          details: existingAfterUploadError.message,
+          type: "video",
+          prompt: job.prompt ?? "",
+          url: publicUrl,
+          storage_path: storagePath,
         },
-        { status: 500 }
-      );
-    }
-
-    if (existingAfterUpload?.url) {
-      return Response.json({
-        status: "completed",
-        progress: 100,
-        downloadUrl: existingAfterUpload.url,
-      });
-    }
-
-    // 5) Insert metadata row once
-    const { error: dbError } = await supabaseAdmin.from("media").insert({
-      type: "video",
-      prompt: job.prompt ?? "",
-      url: publicUrl,
-      storage_path: storagePath,
-    });
-
-    if (dbError) {
-      return Response.json(
         {
-          error: "DB insert failed",
-          details: dbError.message,
-        },
-        { status: 500 }
+          onConflict: "storage_path",
+        }
       );
+
+    if (upsertError) {
+      return jsonError("DB upsert failed", 500, upsertError.message);
     }
 
     return Response.json({
@@ -216,12 +213,10 @@ export async function GET(req: Request) {
     });
   } catch (error: any) {
     console.error("VIDEO GET ERROR:", error);
-    return Response.json(
-      {
-        error: "Status check failed",
-        details: error?.message ?? String(error),
-      },
-      { status: 500 }
+    return jsonError(
+      "Status check failed",
+      500,
+      error?.message ?? String(error)
     );
   }
 }
