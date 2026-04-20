@@ -18,6 +18,11 @@ export default function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
 
+  // Hide navbar on login page
+  if (pathname === "/") {
+    return null;
+  }
+
   async function handleLogout() {
     await supabase.auth.signOut();
     router.replace("/");
@@ -27,14 +32,12 @@ export default function Navbar() {
   return (
     <nav className="w-full border-b border-neutral-200 bg-white">
       <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-4 md:flex-row md:items-center md:justify-between">
-        <div className="flex items-center gap-3">
-          <Link
-            href="/dashboard"
-            className="text-2xl font-semibold text-black"
-          >
-            Zenavant
-          </Link>
-        </div>
+        <Link
+          href="/dashboard"
+          className="text-2xl font-semibold text-black"
+        >
+          Zenavant
+        </Link>
 
         <div className="flex flex-wrap gap-3">
           {navItems.map((item) => {
