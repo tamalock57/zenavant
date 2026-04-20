@@ -3,12 +3,11 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 
-async function fileToBase64(file: File) {
-  const bytes = await file.arrayBuffer();
-  return Buffer.from(bytes).toString("base64");
-}
-
-async function generatePromptIfNeeded(client: OpenAI, idea: string, intensity: string) {
+async function generatePromptIfNeeded(
+  client: OpenAI,
+  idea: string,
+  intensity: string
+) {
   const system = `
 You are Zenavant's image-to-video prompt translator.
 Return ONLY valid JSON:
@@ -30,6 +29,7 @@ ${intensity}
 Rules:
 - Keep movement realistic
 - Keep motion subtle unless the user clearly wants more drama
+- Include a strong, usable motion prompt, not just one sentence
 - Include "The subject remains consistent with the uploaded image."
 - No text, captions, logos, subtitles, or watermarks
 `;
@@ -45,6 +45,7 @@ Rules:
 
   const text = response.output_text?.trim() || "";
   const parsed = JSON.parse(text);
+
   return parsed as { title: string; finalPrompt: string };
 }
 
@@ -68,7 +69,9 @@ export async function POST(req: Request) {
       return Response.json({ error: "Missing image file" }, { status: 400 });
     }
 
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const client = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
 
     let finalPrompt = promptInput;
     let generatedTitle = "Image to Video Prompt";
@@ -82,14 +85,27 @@ export async function POST(req: Request) {
       }
 
       const generated = await generatePromptIfNeeded(client, idea, intensity);
-      finalPrompt = generated.finalPrompt;
       generatedTitle = generated.title || generatedTitle;
+
+      finalPrompt =
+        generated.finalPrompt && generated.finalPrompt.trim().length > 20
+          ? generated.finalPrompt
+          : `The subject remains consistent with the uploaded image.
+
+${idea}
+
+Style: realistic, cinematic, believable motion.
+Intensity: ${intensity}.
+Keep movement natural and grounded.
+No text, subtitles, logos, or watermarks.`;
     }
 
+    // Save uploaded source image to Supabase
     const imageBytes = await image.arrayBuffer();
     const imageBuffer = Buffer.from(imageBytes);
 
     const imagePath = `inputs/${Date.now()}-${image.name.replace(/\s+/g, "-")}`;
+
     const uploadImageResult = await supabaseAdmin.storage
       .from("media")
       .upload(imagePath, imageBuffer, {
@@ -101,18 +117,21 @@ export async function POST(req: Request) {
       return Response.json({ error: uploadImageResult.error.message }, { status: 500 });
     }
 
-    const imagePublicUrl = supabaseAdmin.storage.from("media").getPublicUrl(imagePath).data.publicUrl;
+    const imagePublicUrl = supabaseAdmin.storage
+      .from("media")
+      .getPublicUrl(imagePath).data.publicUrl;
 
-    // Replace this block only if your video API signature differs.
+    // IMPORTANT:
+    // This currently runs as prompt-to-video because the endpoint rejected image_url.
     const job = await client.videos.create({
       model: "sora-2",
       prompt: finalPrompt,
       size,
       seconds,
-      image_url: imagePublicUrl,
     } as any);
 
     const jobId = (job as any)?.id;
+
     if (!jobId) {
       return Response.json({ error: "Video job did not return an id" }, { status: 500 });
     }
@@ -146,13 +165,17 @@ export async function POST(req: Request) {
 
     if (!videoBinaryResponse.ok) {
       const text = await videoBinaryResponse.text();
-      return Response.json({ error: `Failed to fetch video binary: ${text}` }, { status: 500 });
+      return Response.json(
+        { error: `Failed to fetch video binary: ${text}` },
+        { status: 500 }
+      );
     }
 
     const videoArrayBuffer = await videoBinaryResponse.arrayBuffer();
     const videoBuffer = Buffer.from(videoArrayBuffer);
 
     const videoPath = `videos/${Date.now()}-${jobId}.mp4`;
+
     const uploadVideoResult = await supabaseAdmin.storage
       .from("media")
       .upload(videoPath, videoBuffer, {
@@ -164,7 +187,9 @@ export async function POST(req: Request) {
       return Response.json({ error: uploadVideoResult.error.message }, { status: 500 });
     }
 
-    const videoPublicUrl = supabaseAdmin.storage.from("media").getPublicUrl(videoPath).data.publicUrl;
+    const videoPublicUrl = supabaseAdmin.storage
+      .from("media")
+      .getPublicUrl(videoPath).data.publicUrl;
 
     const { data: savedVideo, error: savedVideoError } = await supabaseAdmin
       .from("media")
