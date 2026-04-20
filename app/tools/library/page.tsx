@@ -13,7 +13,6 @@ type RawItem = {
   url?: string | null;
   storage_path?: string | null;
   tool?: string | null;
-  metadata?: any;
   created_at?: string | null;
 };
 
@@ -22,9 +21,9 @@ type Item = RawItem & {
   normalizedType: "prompt" | "plan" | "video" | "image" | "unknown";
 };
 
-function getPublicUrl(storagePath?: string | null) {
-  if (!storagePath) return null;
-  const { data } = supabase.storage.from("media").getPublicUrl(storagePath);
+function getPublicUrl(path?: string | null) {
+  if (!path) return null;
+  const { data } = supabase.storage.from("media").getPublicUrl(path);
   return data?.publicUrl ?? null;
 }
 
@@ -35,36 +34,18 @@ function formatDate(value?: string | null) {
   return d.toLocaleDateString();
 }
 
-function normalizeItemType(item: RawItem, mediaUrl: string | null): Item["normalizedType"] {
-  const type = (item.type || "").toLowerCase().trim();
-  const tool = (item.tool || "").toLowerCase().trim();
-  const url = (mediaUrl || item.url || "").toLowerCase();
+function normalizeType(item: RawItem, mediaUrl: string | null): Item["normalizedType"] {
+  const type = (item.type || "").toLowerCase();
+  const url = (mediaUrl || "").toLowerCase();
 
-  if (type === "prompt" || tool === "turn-thought-into-prompt") return "prompt";
+  if (type === "prompt") return "prompt";
   if (type === "plan") return "plan";
 
-  if (
-    type === "video" ||
-    type === "image_to_video" ||
-    tool === "image-to-video" ||
-    tool === "image_to_video" ||
-    url.endsWith(".mp4") ||
-    url.endsWith(".webm") ||
-    url.endsWith(".mov")
-  ) {
+  if (url.endsWith(".mp4") || url.endsWith(".webm") || url.endsWith(".mov")) {
     return "video";
   }
 
-  if (
-    type === "image" ||
-    type === "image-maker" ||
-    tool === "image-maker" ||
-    tool === "image_maker" ||
-    url.endsWith(".png") ||
-    url.endsWith(".jpg") ||
-    url.endsWith(".jpeg") ||
-    url.endsWith(".webp")
-  ) {
+  if (url.endsWith(".png") || url.endsWith(".jpg") || url.endsWith(".jpeg") || url.endsWith(".webp")) {
     return "image";
   }
 
@@ -82,17 +63,13 @@ export default function LibraryPage() {
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [deleting, setDeleting] = useState(false);
 
+  // ✅ AUTH LOCK
   useEffect(() => {
-    let mounted = true;
-
     async function checkSession() {
       const {
         data: { session },
       } = await supabase.auth.getSession();
-
-      if (!mounted) return;
 
       if (!session) {
         router.replace("/");
@@ -104,42 +81,34 @@ export default function LibraryPage() {
     }
 
     checkSession();
-
-    return () => {
-      mounted = false;
-    };
   }, [router]);
 
+  // ✅ FETCH LIBRARY
   async function fetchLibrary() {
     try {
       setLoading(true);
 
-      const res = await fetch("/api/library", {
-        method: "GET",
-      });
-
+      const res = await fetch("/api/library");
       const data = await res.json();
 
       if (!res.ok) {
-        alert(data.error || "Failed to load library");
+        alert(data.error || "Failed to load");
         return;
       }
 
       const mapped: Item[] = (data.items || []).map((item: RawItem) => {
-        const mediaUrl = item.url || getPublicUrl(item.storage_path) || null;
-        const normalizedType = normalizeItemType(item, mediaUrl);
-
+        const mediaUrl = item.url || getPublicUrl(item.storage_path);
         return {
           ...item,
           mediaUrl,
-          normalizedType,
+          normalizedType: normalizeType(item, mediaUrl),
         };
       });
 
       setItems(mapped);
     } catch (err) {
       console.error(err);
-      alert("Something went wrong");
+      alert("Error loading library");
     } finally {
       setLoading(false);
     }
@@ -157,58 +126,27 @@ export default function LibraryPage() {
     );
   }
 
-  function clearSelection() {
-    setSelectedIds([]);
+  // ✅ USE PROMPT
+  function usePromptForImage(item: Item) {
+    const text = item.prompt || item.title;
+    if (!text) return alert("No prompt found");
+
+    localStorage.setItem("zenavant_prompt", text);
+    router.push("/tools/image-maker");
   }
 
-  async function handleDeleteSelected() {
-    try {
-      if (selectedIds.length === 0) return;
+  function usePromptForVideo(item: Item) {
+    const text = item.prompt || item.title;
+    if (!text) return alert("No prompt found");
 
-      const ok = confirm("Delete selected items?");
-      if (!ok) return;
-
-      setDeleting(true);
-
-      const selectedItems = items.filter((item) => selectedIds.includes(item.id));
-      const storagePaths = selectedItems
-        .map((item) => item.storage_path)
-        .filter(Boolean) as string[];
-
-      if (storagePaths.length > 0) {
-        const { error: storageError } = await supabase.storage
-          .from("media")
-          .remove(storagePaths);
-
-        if (storageError) {
-          console.error(storageError);
-        }
-      }
-
-      const { error } = await supabase
-        .from("media")
-        .delete()
-        .in("id", selectedIds);
-
-      if (error) {
-        console.error(error);
-        alert("Delete failed");
-        return;
-      }
-
-      clearSelection();
-      await fetchLibrary();
-    } catch (err) {
-      console.error(err);
-      alert("Delete failed");
-    } finally {
-      setDeleting(false);
-    }
+    localStorage.setItem("zenavant_prompt", text);
+    router.push("/tools/video-maker");
   }
 
+  // ✅ DOWNLOAD
   function handleDownload(item: Item) {
     if (!item.mediaUrl) {
-      alert("This item has no downloadable file.");
+      alert("No file available");
       return;
     }
 
@@ -222,6 +160,7 @@ export default function LibraryPage() {
 
   const hasItems = useMemo(() => items.length > 0, [items]);
 
+  // ✅ LOADING FIXED
   if (checkingAuth) {
     return (
       <div className="max-w-6xl mx-auto p-4 text-black">
@@ -230,32 +169,28 @@ export default function LibraryPage() {
     );
   }
 
-  if (!isAuthed) {
-    return null;
-  }
+  if (!isAuthed) return null;
 
   return (
     <div className="max-w-6xl mx-auto p-4 space-y-4 text-black">
+      {/* HEADER */}
       <div className="flex justify-between items-center">
         <h1 className="text-xl font-semibold">Library</h1>
 
-        <div className="flex gap-2">
-          <button
-            onClick={fetchLibrary}
-            className="px-3 py-2 rounded-xl bg-neutral-800 text-white"
-          >
-            Refresh
-          </button>
-
-          <button
-            onClick={handleDeleteSelected}
-            disabled={selectedIds.length === 0 || deleting}
-            className="px-3 py-2 rounded-xl bg-red-400 text-white disabled:opacity-50"
-          >
-            {deleting ? "Deleting..." : "Delete"}
-          </button>
-        </div>
+        <button
+          onClick={fetchLibrary}
+          className="px-3 py-2 rounded-xl bg-black text-white"
+        >
+          Refresh
+        </button>
       </div>
+
+      {/* STATES */}
+      {loading && (
+        <div className="py-10 text-center text-neutral-500">
+          Loading...
+        </div>
+      )}
 
       {!loading && !hasItems && (
         <div className="py-10 text-center text-neutral-500">
@@ -263,12 +198,7 @@ export default function LibraryPage() {
         </div>
       )}
 
-      {loading && (
-        <div className="py-10 text-center text-neutral-500">
-          Loading...
-        </div>
-      )}
-
+      {/* GRID */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
         {items.map((item) => {
           const selected = selectedIds.includes(item.id);
@@ -276,95 +206,80 @@ export default function LibraryPage() {
           return (
             <div
               key={item.id}
-              className={`rounded-xl overflow-hidden shadow-sm border border-neutral-300 bg-white ${
+              className={`rounded-xl overflow-hidden shadow border bg-white ${
                 selected ? "ring-2 ring-black" : ""
               }`}
             >
-              <div className="flex justify-between items-center p-3 border-b border-neutral-300">
+              {/* TOP */}
+              <div className="flex justify-between p-3 border-b">
                 <input
                   type="checkbox"
                   checked={selected}
                   onChange={() => toggleSelect(item.id)}
                 />
 
-                <span className="text-xs bg-neutral-100 text-black px-2 py-1 rounded">
-                  {item.type || item.normalizedType}
+                <span className="text-xs bg-neutral-100 px-2 py-1 rounded">
+                  {item.normalizedType}
                 </span>
               </div>
 
+              {/* CONTENT */}
               <div className="aspect-video bg-neutral-50">
-                {item.normalizedType === "prompt" ? (
-                  <div className="p-4 text-sm space-y-2 text-black overflow-auto h-full">
-                    <div className="text-xs text-neutral-500">
-                      {item.tool || "prompt"}
-                    </div>
+                {item.normalizedType === "video" && item.mediaUrl && (
+                  <video src={item.mediaUrl} controls className="w-full h-full object-cover" />
+                )}
 
-                    <div className="font-semibold">
-                      {item.title || "Prompt"}
-                    </div>
+                {item.normalizedType === "image" && item.mediaUrl && (
+                  <img src={item.mediaUrl} className="w-full h-full object-cover" />
+                )}
 
-                    {item.idea ? (
-                      <div className="text-xs text-neutral-500">
-                        Idea: {item.idea}
-                      </div>
-                    ) : null}
-
-                    <div className="whitespace-pre-wrap text-sm">
-                      {item.prompt || "Saved prompt"}
-                    </div>
+                {item.normalizedType === "prompt" && (
+                  <div className="p-3 text-sm overflow-auto h-full">
+                    {item.prompt}
                   </div>
-                ) : item.normalizedType === "plan" ? (
-                  <div className="p-4 text-sm text-black overflow-auto h-full">
-                    {item.prompt || "Saved plan"}
-                  </div>
-                ) : item.normalizedType === "video" ? (
-                  item.mediaUrl ? (
-                    <video
-                      src={item.mediaUrl}
-                      controls
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="p-4 text-black">No video available</div>
-                  )
-                ) : item.normalizedType === "image" ? (
-                  item.mediaUrl ? (
-                    <img
-                      src={item.mediaUrl}
-                      alt={item.prompt || item.title || "Saved image"}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="p-4 text-black">No image available</div>
-                  )
-                ) : (
-                  <div className="p-4 text-black overflow-auto h-full">
-                    <div className="font-semibold mb-2">
-                      {item.title || item.type || "Unknown item"}
-                    </div>
-                    <div className="text-xs text-neutral-500 mb-2">
-                      Tool: {item.tool || "unknown"}
-                    </div>
-                    <div className="text-sm whitespace-pre-wrap">
-                      {item.prompt || "This item does not have a renderable preview yet."}
-                    </div>
+                )}
+
+                {item.normalizedType === "plan" && (
+                  <div className="p-3 text-sm overflow-auto h-full">
+                    {item.prompt}
                   </div>
                 )}
               </div>
 
-              <div className="flex justify-between items-center gap-2 p-3 border-t border-neutral-300">
+              {/* FOOTER */}
+              <div className="p-3 border-t space-y-2">
                 <div className="text-xs text-neutral-500">
                   {formatDate(item.created_at)}
                 </div>
 
-                {item.mediaUrl ? (
-                  <button
-                    onClick={() => handleDownload(item)}
-                    className="px-3 py-1.5 rounded-lg bg-neutral-800 text-white text-xs"
-                  >
-                    Download
-                  </button>
-                ) : null}
+                <div className="flex gap-2 flex-wrap">
+                  {(item.prompt || item.normalizedType === "prompt") && (
+                    <>
+                      <button
+                        onClick={() => usePromptForImage(item)}
+                        className="px-2 py-1 text-xs bg-black text-white rounded"
+                      >
+                        Use → Image
+                      </button>
+
+                      <button
+                        onClick={() => usePromptForVideo(item)}
+                        className="px-2 py-1 text-xs border rounded"
+                      >
+                        Use → Video
+                      </button>
+                    </>
+                  )}
+
+                  {item.mediaUrl && (
+                    <button
+                      onClick={() => handleDownload(item)}
+                      className="px-2 py-1 text-xs bg-neutral-800 text-white rounded"
+                    >
+                      Download
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           );
