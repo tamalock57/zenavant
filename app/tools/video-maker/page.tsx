@@ -17,36 +17,57 @@ type VideoResult = {
 export default function VideoMakerPage() {
   const router = useRouter();
 
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
+  const [idea, setIdea] = useState("");
+  const [styleHint, setStyleHint] = useState("");
+  const [intensity, setIntensity] = useState<"subtle" | "balanced" | "dramatic">("balanced");
+
   const [prompt, setPrompt] = useState("");
   const [size, setSize] = useState("1280x720");
   const [seconds, setSeconds] = useState("8");
   const [numOutputs, setNumOutputs] = useState(1);
 
+  const [loadingPrompt, setLoadingPrompt] = useState(false);
   const [loading, setLoading] = useState(false);
+
   const [jobIds, setJobIds] = useState<string[]>([]);
   const [results, setResults] = useState<VideoResult[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const pollTimer = useRef<number | null>(null);
+
   const canSubmit = prompt.trim().length >= 5;
 
   useEffect(() => {
+    let mounted = true;
+
     async function checkUser() {
       const {
         data: { session },
       } = await supabase.auth.getSession();
 
+      if (!mounted) return;
+
       if (!session) {
-        router.push("/");
+        router.replace("/");
+        return;
       }
+
+      setCheckingAuth(false);
     }
 
     checkUser();
+
+    return () => {
+      mounted = false;
+    };
   }, [router]);
 
   useEffect(() => {
     const saved = localStorage.getItem("zenavant_prompt");
     if (saved) {
+      setIdea(saved);
       setPrompt(saved);
       localStorage.removeItem("zenavant_prompt");
     }
@@ -63,14 +84,52 @@ export default function VideoMakerPage() {
     }
   }
 
+  async function handleGeneratePrompt() {
+    try {
+      if (idea.trim().length < 5) {
+        alert("Please describe your video idea first.");
+        return;
+      }
+
+      setLoadingPrompt(true);
+
+      const res = await fetch("/api/turn-thought-into-prompt", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          idea,
+          mode: "video",
+          intensity,
+          styleHint,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert(data.error || "Failed to generate prompt.");
+        return;
+      }
+
+      setPrompt(data.finalPrompt || "");
+    } catch (err) {
+      console.error(err);
+      alert("Something went wrong.");
+    } finally {
+      setLoadingPrompt(false);
+    }
+  }
+
   async function pollOne(id: string) {
     const res = await fetch(`/api/video-maker?id=${encodeURIComponent(id)}`, {
       cache: "no-store",
     });
 
     const text = await res.text();
-    let data: any = {};
 
+    let data: any = {};
     try {
       data = text ? JSON.parse(text) : {};
     } catch {
@@ -89,6 +148,7 @@ export default function VideoMakerPage() {
       const all = await Promise.all(
         ids.map(async (id) => {
           const data = await pollOne(id);
+
           return {
             jobId: id,
             status: (data.status ?? null) as JobStatus | null,
@@ -102,19 +162,25 @@ export default function VideoMakerPage() {
       setResults(all);
 
       const hasFailure = all.some((item) => item.status === "failed");
-      const allCompleted = all.length > 0 && all.every((item) => item.status === "completed");
-      const allFinished = all.length > 0 && all.every((item) =>
-        item.status === "completed" || item.status === "failed"
-      );
+      const allCompleted =
+        all.length > 0 && all.every((item) => item.status === "completed");
+      const allFinished =
+        all.length > 0 &&
+        all.every(
+          (item) =>
+            item.status === "completed" || item.status === "failed"
+        );
 
       if (hasFailure) {
-        const firstFailure = all.find((item) => item.error)?.error || "One or more videos failed";
+        const firstFailure =
+          all.find((item) => item.error)?.error || "One or more videos failed";
         setError(firstFailure);
       }
 
       if (allFinished) {
         stopPolling();
         setLoading(false);
+
         if (allCompleted) {
           setPrompt("");
         }
@@ -148,8 +214,8 @@ export default function VideoMakerPage() {
       });
 
       const text = await res.text();
-      let data: any = {};
 
+      let data: any = {};
       try {
         data = text ? JSON.parse(text) : {};
       } catch {
@@ -175,6 +241,7 @@ export default function VideoMakerPage() {
       }
 
       setJobIds(ids);
+
       setResults(
         ids.map((id) => ({
           jobId: id,
@@ -194,62 +261,75 @@ export default function VideoMakerPage() {
     }
   }
 
-  return (
-    <main style={{ maxWidth: 760, margin: "0 auto", padding: 24 }}>
-      <h1 style={{ fontSize: 34, fontWeight: 750, marginBottom: 6 }}>
-        Video Maker
-      </h1>
+  if (checkingAuth) {
+    return (
+      <div className="max-w-3xl mx-auto p-4 text-black">
+        Loading...
+      </div>
+    );
+  }
 
-      <p style={{ opacity: 0.8, marginTop: 0 }}>
+  return (
+    <main className="max-w-3xl mx-auto p-6 space-y-4 text-black">
+      <h1 className="text-2xl md:text-3xl font-semibold">Video Maker</h1>
+      <p className="text-neutral-600">
         Describe a short video. Zenavant generates it.
       </p>
 
-      <div
-        style={{
-          marginTop: 16,
-          padding: 16,
-          border: "1px solid rgba(0,0,0,0.12)",
-          borderRadius: 12,
-          background: "#fff",
-        }}
-      >
-        <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
-          Prompt
-        </label>
-
+      <div className="rounded-2xl border border-neutral-300 bg-white p-4 space-y-4">
         <textarea
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Example: A calm cinematic shot of a desk by a window. Slow camera push-in."
-          rows={4}
-          style={{
-            width: "100%",
-            padding: 12,
-            fontSize: 16,
-            borderRadius: 10,
-            border: "1px solid rgba(0,0,0,0.12)",
-            boxSizing: "border-box",
-          }}
+          value={idea}
+          onChange={(e) => setIdea(e.target.value)}
+          placeholder="Describe the video you want to make..."
+          className="w-full min-h-[120px] rounded-2xl border border-neutral-300 bg-white p-4 text-black placeholder:text-neutral-500"
         />
 
-        <div
-          style={{
-            display: "flex",
-            gap: 10,
-            marginTop: 12,
-            alignItems: "center",
-            flexWrap: "wrap",
-          }}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <input
+            value={styleHint}
+            onChange={(e) => setStyleHint(e.target.value)}
+            placeholder="Style hint (e.g., cinematic, noir, realistic)"
+            className="rounded-xl border border-neutral-300 bg-white p-3 text-black placeholder:text-neutral-500"
+          />
+
+          <select
+            value={intensity}
+            onChange={(e) =>
+              setIntensity(e.target.value as "subtle" | "balanced" | "dramatic")
+            }
+            className="rounded-xl border border-neutral-300 bg-white p-3 text-black"
+          >
+            <option value="subtle">Subtle</option>
+            <option value="balanced">Balanced</option>
+            <option value="dramatic">Dramatic</option>
+          </select>
+        </div>
+
+        <button
+          onClick={handleGeneratePrompt}
+          disabled={loadingPrompt}
+          className="w-full rounded-2xl bg-neutral-800 px-4 py-3 text-white disabled:opacity-50"
         >
-          <label style={{ fontSize: 14, opacity: 0.85 }}>Size</label>
+          {loadingPrompt ? "Generating Prompt..." : "Generate Prompt"}
+        </button>
+
+        <div>
+          <label className="block font-semibold mb-2">Prompt</label>
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="Example: A calm cinematic shot of a desk by a window. Slow camera push-in."
+            rows={5}
+            className="w-full rounded-2xl border border-neutral-300 bg-white p-4 text-black placeholder:text-neutral-500"
+          />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-[auto_1fr_auto_1fr] gap-3 items-center">
+          <label className="text-sm text-neutral-700">Size</label>
           <select
             value={size}
             onChange={(e) => setSize(e.target.value)}
-            style={{
-              padding: "8px 10px",
-              borderRadius: 10,
-              border: "1px solid rgba(0,0,0,0.12)",
-            }}
+            className="rounded-xl border border-neutral-300 bg-white p-3 text-black"
           >
             <option value="1280x720">1280x720 (landscape)</option>
             <option value="720x1280">720x1280 (portrait)</option>
@@ -257,15 +337,11 @@ export default function VideoMakerPage() {
             <option value="1024x1792">1024x1792 (tall HD)</option>
           </select>
 
-          <label style={{ fontSize: 14, opacity: 0.85 }}>Seconds</label>
+          <label className="text-sm text-neutral-700">Seconds</label>
           <select
             value={seconds}
             onChange={(e) => setSeconds(e.target.value)}
-            style={{
-              padding: "8px 10px",
-              borderRadius: 10,
-              border: "1px solid rgba(0,0,0,0.12)",
-            }}
+            className="rounded-xl border border-neutral-300 bg-white p-3 text-black"
           >
             <option value="4">4</option>
             <option value="8">8</option>
@@ -273,27 +349,19 @@ export default function VideoMakerPage() {
           </select>
         </div>
 
-        <div style={{ marginTop: 12 }}>
-          <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
-            Number of Outputs
-          </label>
+        <div>
+          <label className="block font-semibold mb-2">Number of Outputs</label>
           <select
             value={numOutputs}
             onChange={(e) => setNumOutputs(Number(e.target.value))}
-            style={{
-              padding: "10px 12px",
-              fontSize: 16,
-              borderRadius: 10,
-              border: "1px solid rgba(0,0,0,0.2)",
-              background: "#fff",
-            }}
+            className="rounded-xl border border-neutral-300 bg-white p-3 text-black"
           >
             <option value={1}>1 (Fastest)</option>
             <option value={2}>2</option>
             <option value={3}>3</option>
           </select>
 
-          <div style={{ marginTop: 8, fontSize: 13, opacity: 0.75 }}>
+          <div className="mt-2 text-sm text-neutral-600">
             More outputs give you more variations, but use more credits.
           </div>
         </div>
@@ -301,47 +369,34 @@ export default function VideoMakerPage() {
         <button
           onClick={generate}
           disabled={loading || !canSubmit}
-          style={{
-            marginTop: 16,
-            padding: "10px 14px",
-            fontSize: 16,
-            borderRadius: 10,
-            border: "1px solid rgba(0,0,0,0.2)",
-            background: loading || !canSubmit ? "rgba(0,0,0,0.08)" : "#111",
-            color: loading || !canSubmit ? "#444" : "#fff",
-            cursor: loading || !canSubmit ? "not-allowed" : "pointer",
-            fontWeight: 600,
-          }}
+          className="w-full rounded-2xl bg-black px-4 py-3 text-white disabled:opacity-50"
         >
-          {loading ? "Generating..." : "Generate Video"}
+          {loading ? "Generating Video..." : "Generate Video"}
         </button>
 
-        <div style={{ marginTop: 10, fontSize: 13, opacity: 0.75 }}>
-          Keep this page open while generating. Closing or refreshing the page can interrupt the visible progress and may cause errors when you return.
+        <div className="text-sm text-neutral-600">
+          Keep this page open while generating. Closing or refreshing the page can
+          interrupt the visible progress and may cause errors when you return.
         </div>
 
         {jobIds.length > 0 && (
-          <div style={{ marginTop: 12, fontSize: 14, opacity: 0.85 }}>
+          <div className="text-sm text-neutral-700">
             <b>Jobs:</b> {jobIds.length}
           </div>
         )}
 
         {results.length > 0 && (
-          <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+          <div className="grid gap-3">
             {results.map((item, index) => (
               <div
                 key={item.jobId}
-                style={{
-                  padding: 12,
-                  border: "1px solid rgba(0,0,0,0.08)",
-                  borderRadius: 10,
-                  background: "#fafafa",
-                }}
+                className="rounded-xl border border-neutral-200 bg-neutral-50 p-3"
               >
-                <div style={{ fontSize: 14 }}>
-                  <b>Output {index + 1}</b>
+                <div className="text-sm font-semibold">
+                  Output {index + 1}
                 </div>
-                <div style={{ marginTop: 4, fontSize: 13, opacity: 0.85 }}>
+
+                <div className="mt-2 text-sm text-neutral-700">
                   <div>
                     <b>Status:</b> {item.status ?? "-"}
                   </div>
@@ -349,7 +404,7 @@ export default function VideoMakerPage() {
                     <b>Progress:</b> {item.progress}%
                   </div>
                   {item.error && (
-                    <div style={{ color: "#991b1b", marginTop: 4 }}>{item.error}</div>
+                    <div className="mt-2 text-red-700">{item.error}</div>
                   )}
                 </div>
               </div>
@@ -358,45 +413,22 @@ export default function VideoMakerPage() {
         )}
 
         {error && (
-          <div
-            style={{
-              marginTop: 12,
-              padding: 12,
-              borderRadius: 10,
-              border: "1px solid rgba(220,38,38,0.25)",
-              background: "rgba(254,242,242,1)",
-              color: "#991b1b",
-            }}
-          >
+          <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-red-700">
             {error}
           </div>
         )}
       </div>
 
       {results.some((item) => item.videoUrl) && (
-        <section
-          style={{
-            marginTop: 18,
-            padding: 16,
-            border: "1px solid rgba(0,0,0,0.12)",
-            borderRadius: 12,
-            background: "#fff",
-          }}
-        >
-          <h2 style={{ fontSize: 18, fontWeight: 750, marginTop: 0 }}>
-            Results
-          </h2>
+        <section className="rounded-2xl border border-neutral-300 bg-white p-4">
+          <h2 className="text-lg font-semibold">Results</h2>
 
           <div
-            style={{
-              display: "grid",
-              gridTemplateColumns:
-                results.filter((item) => item.videoUrl).length > 1
-                  ? "repeat(auto-fit, minmax(260px, 1fr))"
-                  : "1fr",
-              gap: 16,
-              marginTop: 10,
-            }}
+            className={`mt-4 grid gap-4 ${
+              results.filter((item) => item.videoUrl).length > 1
+                ? "grid-cols-1 md:grid-cols-2"
+                : "grid-cols-1"
+            }`}
           >
             {results.map((item, index) =>
               item.videoUrl ? (
@@ -404,17 +436,17 @@ export default function VideoMakerPage() {
                   <video
                     controls
                     src={item.videoUrl}
-                    style={{
-                      width: "100%",
-                      height: "auto",
-                      borderRadius: 10,
-                    }}
+                    className="w-full rounded-xl"
                   />
-                  <div style={{ marginTop: 8, fontSize: 13, opacity: 0.75 }}>
+                  <div className="mt-2 text-sm text-neutral-600">
                     Output {index + 1}
                   </div>
-                  <div style={{ marginTop: 8 }}>
-                    <a href={item.videoUrl} download style={{ fontSize: 14 }}>
+                  <div className="mt-2">
+                    <a
+                      href={item.videoUrl}
+                      download
+                      className="text-sm text-black underline"
+                    >
                       Download video
                     </a>
                   </div>
