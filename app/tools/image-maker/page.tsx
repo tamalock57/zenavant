@@ -1,336 +1,229 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
-const SIZE_OPTIONS = [
-  { value: "1024x1024", label: "1024x1024 (Square)" },
-  { value: "1536x1024", label: "1536x1024 (Landscape)" },
-  { value: "1024x1536", label: "1024x1536 (Portrait)" },
-];
+type PromptResult = {
+  title: string;
+  summary: string;
+  subject: string;
+  setting: string;
+  action: string;
+  emotion: string;
+  camera: string;
+  style: string;
+  rules: string[];
+  finalPrompt: string;
+};
 
 export default function ImageMakerPage() {
+  const [idea, setIdea] = useState("");
+  const [styleHint, setStyleHint] = useState("");
+  const [intensity, setIntensity] = useState<"subtle" | "balanced" | "dramatic">("balanced");
   const [prompt, setPrompt] = useState("");
   const [size, setSize] = useState("1024x1024");
-  const [numOutputs, setNumOutputs] = useState(1);
 
-  const [mainImage, setMainImage] = useState<File | null>(null);
-  const [referenceImages, setReferenceImages] = useState<File[]>([]);
+  const [loadingPrompt, setLoadingPrompt] = useState(false);
+  const [loadingImage, setLoadingImage] = useState(false);
+  const [savingPrompt, setSavingPrompt] = useState(false);
 
-  const [imageUrls, setImageUrls] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [generatedImageUrl, setGeneratedImageUrl] = useState("");
+  const [promptResult, setPromptResult] = useState<PromptResult | null>(null);
 
-  const mainPreview = useMemo(() => {
-    return mainImage ? URL.createObjectURL(mainImage) : null;
-  }, [mainImage]);
-
-  const referencePreviews = useMemo(() => {
-    return referenceImages.map((file) => ({
-      name: file.name,
-      url: URL.createObjectURL(file),
-    }));
-  }, [referenceImages]);
-
-  async function generate() {
-    setLoading(true);
-    setError(null);
-    setImageUrls([]);
-
+  async function handleGeneratePrompt() {
     try {
-      if (!prompt.trim()) {
-        setError("Please enter a prompt.");
-        setLoading(false);
+      if (idea.trim().length < 5) {
+        alert("Please describe your idea first.");
         return;
       }
 
-      const fd = new FormData();
-      fd.append("prompt", prompt);
-      fd.append("size", size);
-      fd.append("numOutputs", String(numOutputs));
+      setLoadingPrompt(true);
 
-      if (mainImage) {
-        fd.append("mainImage", mainImage);
-      }
-
-      referenceImages.forEach((file) => {
-        fd.append("referenceImages", file);
-      });
-
-      const res = await fetch("/api/image-maker", {
+      const res = await fetch("/api/turn-thought-into-prompt", {
         method: "POST",
-        body: fd,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          idea,
+          mode: "image",
+          intensity,
+          styleHint,
+        }),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data?.error || "Image generation failed");
+        alert(data.error || "Failed to generate prompt");
+        return;
       }
 
-      if (Array.isArray(data?.urls) && data.urls.length > 0) {
-        setImageUrls(data.urls);
-      } else if (data?.url) {
-        setImageUrls([data.url]);
-      } else {
-        throw new Error("No image URLs returned.");
-      }
-    } catch (e: any) {
-      setError(e?.message || "Something went wrong");
+      setPromptResult(data);
+      setPrompt(data.finalPrompt || "");
+    } catch (err) {
+      console.error(err);
+      alert("Something went wrong");
     } finally {
-      setLoading(false);
+      setLoadingPrompt(false);
+    }
+  }
+
+  async function handleSavePrompt() {
+    try {
+      if (!prompt) {
+        alert("No prompt to save.");
+        return;
+      }
+
+      setSavingPrompt(true);
+
+      const res = await fetch("/api/save-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: promptResult?.title || "Image Prompt",
+          idea,
+          prompt,
+          tool: "image-maker",
+          metadata: {
+            intensity,
+            styleHint,
+            size,
+          },
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert(data.error || "Failed to save prompt");
+        return;
+      }
+
+      alert("Prompt saved to Library.");
+    } catch (err) {
+      console.error(err);
+      alert("Failed to save prompt.");
+    } finally {
+      setSavingPrompt(false);
+    }
+  }
+
+  async function handleGenerateImage() {
+    try {
+      if (!prompt || prompt.length < 5) {
+        alert("Prompt is required.");
+        return;
+      }
+
+      setLoadingImage(true);
+      setGeneratedImageUrl("");
+
+      const res = await fetch("/api/image-maker", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          size,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert(data.error || "Image generation failed");
+        return;
+      }
+
+      setGeneratedImageUrl(data?.url || "");
+    } catch (err) {
+      console.error(err);
+      alert("Something went wrong.");
+    } finally {
+      setLoadingImage(false);
     }
   }
 
   return (
-    <main style={{ maxWidth: 860, margin: "0 auto", padding: 24 }}>
-      <h1 style={{ fontSize: 34, fontWeight: 750, marginBottom: 6 }}>
-        Image Maker
-      </h1>
+    <div className="max-w-3xl mx-auto p-4 space-y-4">
+      <h1 className="text-2xl font-semibold text-white">Image Maker</h1>
 
-      <p style={{ opacity: 0.8, marginTop: 0 }}>
-        Generate a new image from a prompt, with optional reference images.
-      </p>
+      <textarea
+        value={idea}
+        onChange={(e) => setIdea(e.target.value)}
+        placeholder="Describe what you want to make..."
+        className="w-full min-h-[120px] rounded-2xl border border-neutral-700 bg-neutral-900 p-4 text-white"
+      />
 
-      <div
-        style={{
-          marginTop: 16,
-          padding: 16,
-          border: "1px solid rgba(0,0,0,0.12)",
-          borderRadius: 12,
-          background: "#fff",
-        }}
-      >
-        <div>
-          <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
-            Prompt
-          </label>
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Describe the image you want to create..."
-            rows={5}
-            style={{
-              width: "100%",
-              padding: 12,
-              fontSize: 16,
-              borderRadius: 10,
-              border: "1px solid rgba(0,0,0,0.18)",
-              boxSizing: "border-box",
-            }}
-          />
-        </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <input
+          value={styleHint}
+          onChange={(e) => setStyleHint(e.target.value)}
+          placeholder="Optional style hint"
+          className="rounded-xl border border-neutral-700 bg-neutral-900 p-3 text-white"
+        />
 
-        <div style={{ marginTop: 12 }}>
-          <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
-            Size
-          </label>
-          <select
-            value={size}
-            onChange={(e) => setSize(e.target.value)}
-            style={{
-              padding: "10px 12px",
-              fontSize: 16,
-              borderRadius: 10,
-              border: "1px solid rgba(0,0,0,0.2)",
-              background: "#fff",
-            }}
-          >
-            {SIZE_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div style={{ marginTop: 12 }}>
-          <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
-            Number of Outputs
-          </label>
-          <select
-            value={numOutputs}
-            onChange={(e) => setNumOutputs(Number(e.target.value))}
-            style={{
-              padding: "10px 12px",
-              fontSize: 16,
-              borderRadius: 10,
-              border: "1px solid rgba(0,0,0,0.2)",
-              background: "#fff",
-            }}
-          >
-            <option value={1}>1 (Fastest)</option>
-            <option value={2}>2</option>
-            <option value={3}>3</option>
-          </select>
-
-          <div style={{ marginTop: 8, fontSize: 13, opacity: 0.75 }}>
-            More outputs give you more variations, but use more credits.
-          </div>
-        </div>
-
-        <div style={{ marginTop: 16 }}>
-          <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
-            Main Image (optional)
-          </label>
-          <input
-            type="file"
-            accept=".png,.jpg,.jpeg,.webp"
-            onChange={(e) => setMainImage(e.target.files?.[0] ?? null)}
-          />
-          <div style={{ marginTop: 8, fontSize: 14, opacity: 0.8 }}>
-            {mainImage?.name || "No main image selected"}
-          </div>
-
-          {mainPreview && (
-            <div style={{ marginTop: 12 }}>
-              <img
-                src={mainPreview}
-                alt="Main preview"
-                style={{
-                  width: 180,
-                  height: 180,
-                  objectFit: "cover",
-                  borderRadius: 12,
-                  border: "1px solid rgba(0,0,0,0.12)",
-                }}
-              />
-            </div>
-          )}
-        </div>
-
-        <div style={{ marginTop: 16 }}>
-          <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
-            Extra Reference Images (optional)
-          </label>
-          <input
-            type="file"
-            accept=".png,.jpg,.jpeg,.webp"
-            multiple
-            onChange={(e) =>
-              setReferenceImages(Array.from(e.target.files || []))
-            }
-          />
-          <div style={{ marginTop: 8, fontSize: 14, opacity: 0.8 }}>
-            {referenceImages.length > 0
-              ? `${referenceImages.length} reference image(s) selected`
-              : "No reference images selected"}
-          </div>
-
-          {referencePreviews.length > 0 && (
-            <div
-              style={{
-                marginTop: 12,
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
-                gap: 12,
-              }}
-            >
-              {referencePreviews.map((item) => (
-                <div key={`${item.name}-${item.url}`}>
-                  <img
-                    src={item.url}
-                    alt={item.name}
-                    style={{
-                      width: "100%",
-                      aspectRatio: "1 / 1",
-                      objectFit: "cover",
-                      borderRadius: 12,
-                      border: "1px solid rgba(0,0,0,0.12)",
-                    }}
-                  />
-                  <div
-                    style={{
-                      marginTop: 6,
-                      fontSize: 12,
-                      opacity: 0.75,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {item.name}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <button
-          onClick={generate}
-          disabled={loading}
-          style={{
-            marginTop: 16,
-            padding: "10px 14px",
-            fontSize: 16,
-            borderRadius: 10,
-            border: "1px solid rgba(0,0,0,0.2)",
-            background: loading ? "rgba(0,0,0,0.08)" : "#111",
-            color: loading ? "#444" : "#fff",
-            cursor: loading ? "not-allowed" : "pointer",
-            fontWeight: 600,
-          }}
+        <select
+          value={intensity}
+          onChange={(e) => setIntensity(e.target.value as any)}
+          className="rounded-xl border border-neutral-700 bg-neutral-900 p-3 text-white"
         >
-          {loading ? "Generating..." : "Generate Image"}
-        </button>
+          <option value="subtle">Make it more subtle</option>
+          <option value="balanced">Balanced</option>
+          <option value="dramatic">Make it more dramatic</option>
+        </select>
 
-        {error && (
-          <div
-            style={{
-              marginTop: 12,
-              padding: 12,
-              borderRadius: 10,
-              border: "1px solid rgba(220,38,38,0.25)",
-              background: "rgba(254,242,242,1)",
-              color: "#991b1b",
-            }}
-          >
-            {error}
-          </div>
-        )}
+        <select
+          value={size}
+          onChange={(e) => setSize(e.target.value)}
+          className="rounded-xl border border-neutral-700 bg-neutral-900 p-3 text-white"
+        >
+          <option value="1024x1024">1024x1024</option>
+          <option value="1024x1536">1024x1536</option>
+          <option value="1536x1024">1536x1024</option>
+        </select>
       </div>
 
-      {imageUrls.length > 0 && (
-        <section
-          style={{
-            marginTop: 18,
-            padding: 16,
-            border: "1px solid rgba(0,0,0,0.12)",
-            borderRadius: 12,
-            background: "#fff",
-          }}
-        >
-          <h2 style={{ fontSize: 18, fontWeight: 750, marginTop: 0 }}>
-            Results
-          </h2>
+      <button
+        onClick={handleGeneratePrompt}
+        disabled={loadingPrompt}
+        className="w-full rounded-2xl bg-neutral-800 px-4 py-3 text-white disabled:opacity-50"
+      >
+        {loadingPrompt ? "Generating Prompt..." : "Generate Prompt"}
+      </button>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: imageUrls.length > 1 ? "repeat(auto-fit, minmax(220px, 1fr))" : "1fr",
-              gap: 16,
-              marginTop: 10,
-            }}
-          >
-            {imageUrls.map((url, index) => (
-              <div key={`${url}-${index}`}>
-                <img
-                  src={url}
-                  alt={`Generated result ${index + 1}`}
-                  style={{
-                    width: "100%",
-                    borderRadius: 10,
-                    display: "block",
-                  }}
-                />
-                <div style={{ marginTop: 8, fontSize: 13, opacity: 0.7 }}>
-                  Output {index + 1}
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
+      <textarea
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        placeholder="Your prompt will appear here..."
+        className="w-full min-h-[180px] rounded-2xl border border-neutral-700 bg-neutral-900 p-4 text-white"
+      />
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <button
+          onClick={handleSavePrompt}
+          disabled={savingPrompt}
+          className="rounded-2xl bg-neutral-800 px-4 py-3 text-white disabled:opacity-50"
+        >
+          {savingPrompt ? "Saving..." : "Save Prompt to Library"}
+        </button>
+
+        <button
+          onClick={handleGenerateImage}
+          disabled={loadingImage}
+          className="rounded-2xl bg-white px-4 py-3 text-black disabled:opacity-50"
+        >
+          {loadingImage ? "Generating Image..." : "Generate Image"}
+        </button>
+      </div>
+
+      {generatedImageUrl && (
+        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4">
+          <img
+            src={generatedImageUrl}
+            alt="Generated"
+            className="w-full rounded-xl object-cover"
+          />
+        </div>
       )}
-    </main>
+    </div>
   );
 }

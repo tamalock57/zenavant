@@ -1,216 +1,142 @@
 import OpenAI from "openai";
-import sharp from "sharp";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-function jsonError(message: string, status = 400) {
-  return Response.json({ error: message }, { status });
+async function fileToBase64(file: File) {
+  const bytes = await file.arrayBuffer();
+  return Buffer.from(bytes).toString("base64");
 }
 
-function toBytes(buf: ArrayBuffer) {
-  return new Uint8Array(buf);
+async function generatePromptIfNeeded(client: OpenAI, idea: string, intensity: string) {
+  const system = `
+You are Zenavant's image-to-video prompt translator.
+Return ONLY valid JSON:
+{
+  "title": "",
+  "finalPrompt": ""
 }
+`;
 
-async function normalizeImage(
-  file: File,
-  width: number,
-  height: number,
-  fitMode: "preserve" | "fill"
-) {
-  const inputBuffer = Buffer.from(await file.arrayBuffer());
+  const user = `
+User idea:
+"${idea}"
 
-  if (fitMode === "fill") {
-    return sharp(inputBuffer)
-      .resize(width, height, {
-        fit: "cover",
-        position: "centre",
-      })
-      .png()
-      .toBuffer();
-  }
+This is for animating an uploaded image.
 
-  return sharp(inputBuffer)
-    .resize(width, height, {
-      fit: "contain",
-      background: { r: 0, g: 0, b: 0, alpha: 1 },
-      position: "centre",
-    })
-    .png()
-    .toBuffer();
-}
+Intensity:
+${intensity}
 
-async function buildCompositeReference(
-  mainFile: File,
-  referenceFiles: File[],
-  size: "1280x720" | "720x1280",
-  fitMode: "preserve" | "fill"
-) {
-  const [width, height] = size.split("x").map(Number);
+Rules:
+- Keep movement realistic
+- Keep motion subtle unless the user clearly wants more drama
+- Include "The subject remains consistent with the uploaded image."
+- No text, captions, logos, subtitles, or watermarks
+`;
 
-  if (referenceFiles.length === 0) {
-    return normalizeImage(mainFile, width, height, fitMode);
-  }
+  const response = await client.responses.create({
+    model: "gpt-4o-mini",
+    temperature: 0.7,
+    input: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+  });
 
-  const stripHeight = size === "720x1280" ? 220 : 180;
-  const mainHeight = height - stripHeight;
-
-  const mainBuffer = await normalizeImage(mainFile, width, mainHeight, fitMode);
-
-  const refs = referenceFiles.slice(0, 4);
-  const refWidth = Math.floor(width / refs.length);
-
-  const refBuffers = await Promise.all(
-    refs.map((file) =>
-      normalizeImage(file, refWidth, stripHeight, fitMode)
-    )
-  );
-
-  const refComposites = refBuffers.map((buffer, index) => ({
-    input: buffer,
-    left: index * refWidth,
-    top: mainHeight,
-  }));
-
-  return sharp({
-    create: {
-      width,
-      height,
-      channels: 4,
-      background: { r: 255, g: 255, b: 255, alpha: 1 },
-    },
-  })
-    .composite([{ input: mainBuffer, left: 0, top: 0 }, ...refComposites])
-    .png()
-    .toBuffer();
+  const text = response.output_text?.trim() || "";
+  const parsed = JSON.parse(text);
+  return parsed as { title: string; finalPrompt: string };
 }
 
 export async function POST(req: Request) {
   try {
-    const form = await req.formData();
-
-    const file = form.get("file") as File | null;
-    const prompt = String(form.get("prompt") ?? "").trim();
-    const seconds = String(form.get("seconds") ?? "8") as "4" | "8" | "12";
-    const size = String(form.get("size") ?? "1280x720") as
-      | "1280x720"
-      | "720x1280";
-    const model = String(form.get("model") ?? "sora-2");
-    const fitMode = String(form.get("fitMode") ?? "preserve") as
-      | "preserve"
-      | "fill";
-
-    const numOutputs = Math.min(
-      3,
-      Math.max(1, Number(form.get("numOutputs") ?? 1))
-    );
-
-    const referenceFiles = (form.getAll("references") as File[]).filter(
-      Boolean
-    );
-
     if (!process.env.OPENAI_API_KEY) {
-      return jsonError("Missing OPENAI_API_KEY on server", 500);
+      return Response.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
     }
 
-    if (!file) return jsonError("Missing main image");
-    if (!prompt) return jsonError("Missing prompt");
+    const formData = await req.formData();
 
-    const compositeBuffer = await buildCompositeReference(
-      file,
-      referenceFiles,
-      size,
-      fitMode
-    );
+    const image = formData.get("image") as File | null;
+    const promptInput = (formData.get("prompt") ?? "").toString().trim();
+    const idea = (formData.get("idea") ?? "").toString().trim();
+    const intensity = (formData.get("intensity") ?? "balanced").toString();
+    const size = (formData.get("size") ?? "1280x720").toString();
+    const seconds = (formData.get("seconds") ?? "4").toString() as "4" | "8" | "12";
+    const fit = (formData.get("fit") ?? "preserve").toString();
 
-    const base64 = compositeBuffer.toString("base64");
-    const dataUrl = `data:image/png;base64,${base64}`;
-
-    // 🔥 MULTI OUTPUT JOB CREATION
-    const jobs = await Promise.all(
-      Array.from({ length: numOutputs }).map(() =>
-        openai.videos.create({
-          model,
-          prompt,
-          seconds,
-          size,
-          input_reference: {
-            image_url: dataUrl,
-          } as any,
-        } as any)
-      )
-    );
-
-    const ids = jobs.map((job) => job.id);
-    const first = jobs[0];
-
-    if (ids.length === 1) {
-      return Response.json({
-        id: first.id,
-        status: first.status,
-        progress: first.progress ?? 0,
-      });
+    if (!image) {
+      return Response.json({ error: "Missing image file" }, { status: 400 });
     }
 
-    return Response.json({
-      ids,
-      status: first.status,
-      progress: first.progress ?? 0,
-    });
-  } catch (err: any) {
-    console.error("POST image-to-video error:", err);
-    return Response.json(
-      { error: err?.message ?? "Image-to-video failed" },
-      { status: 500 }
-    );
-  }
-}
+    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-export async function GET(req: Request) {
-  try {
-    const id = new URL(req.url).searchParams.get("id");
-    if (!id) return jsonError("Missing id");
+    let finalPrompt = promptInput;
+    let generatedTitle = "Image to Video Prompt";
 
-    const job = await openai.videos.retrieve(id);
+    if (!finalPrompt) {
+      if (!idea || idea.length < 5) {
+        return Response.json(
+          { error: "Either prompt or idea is required." },
+          { status: 400 }
+        );
+      }
 
-    if (job.status === "failed") {
-      return Response.json({
-        status: "failed",
-        progress: job.progress ?? 0,
-        error: job.error?.message ?? "Image-to-video failed",
-      });
+      const generated = await generatePromptIfNeeded(client, idea, intensity);
+      finalPrompt = generated.finalPrompt;
+      generatedTitle = generated.title || generatedTitle;
     }
 
-    if (job.status !== "completed") {
-      return Response.json({
-        status: job.status,
-        progress: job.progress ?? 0,
-      });
-    }
+    const imageBytes = await image.arrayBuffer();
+    const imageBuffer = Buffer.from(imageBytes);
 
-    const storagePath = `videos/image-to-video-${id}.mp4`;
-
-    const { data: existingRow } = await supabaseAdmin
+    const imagePath = `inputs/${Date.now()}-${image.name.replace(/\s+/g, "-")}`;
+    const uploadImageResult = await supabaseAdmin.storage
       .from("media")
-      .select("url")
-      .eq("storage_path", storagePath)
-      .maybeSingle();
-
-    if (existingRow?.url) {
-      return Response.json({
-        status: "completed",
-        progress: 100,
-        downloadUrl: existingRow.url,
+      .upload(imagePath, imageBuffer, {
+        contentType: image.type || "image/png",
+        upsert: false,
       });
+
+    if (uploadImageResult.error) {
+      return Response.json({ error: uploadImageResult.error.message }, { status: 500 });
     }
 
-    const contentRes = await fetch(
-      `https://api.openai.com/v1/videos/${id}/content`,
+    const imagePublicUrl = supabaseAdmin.storage.from("media").getPublicUrl(imagePath).data.publicUrl;
+
+    // Replace this block only if your video API signature differs.
+    const job = await client.videos.create({
+      model: "sora-2",
+      prompt: finalPrompt,
+      size,
+      seconds,
+      image_url: imagePublicUrl,
+    } as any);
+
+    const jobId = (job as any)?.id;
+    if (!jobId) {
+      return Response.json({ error: "Video job did not return an id" }, { status: 500 });
+    }
+
+    let status = (job as any)?.status || "queued";
+    let attempts = 0;
+    let latestJob: any = job;
+
+    while (status !== "completed" && status !== "failed" && attempts < 60) {
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      latestJob = await client.videos.retrieve(jobId as any);
+      status = latestJob?.status;
+      attempts++;
+    }
+
+    if (status !== "completed") {
+      return Response.json(
+        { error: latestJob?.error?.message || "Video generation failed or timed out." },
+        { status: 500 }
+      );
+    }
+
+    const videoBinaryResponse = await fetch(
+      `https://api.openai.com/v1/videos/${jobId}/content`,
       {
         headers: {
           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
@@ -218,45 +144,77 @@ export async function GET(req: Request) {
       }
     );
 
-    if (!contentRes.ok) {
-      const text = await contentRes.text();
-      return jsonError("Failed to download video content", 500);
+    if (!videoBinaryResponse.ok) {
+      const text = await videoBinaryResponse.text();
+      return Response.json({ error: `Failed to fetch video binary: ${text}` }, { status: 500 });
     }
 
-    const buf = await contentRes.arrayBuffer();
+    const videoArrayBuffer = await videoBinaryResponse.arrayBuffer();
+    const videoBuffer = Buffer.from(videoArrayBuffer);
 
-    await supabaseAdmin.storage
+    const videoPath = `videos/${Date.now()}-${jobId}.mp4`;
+    const uploadVideoResult = await supabaseAdmin.storage
       .from("media")
-      .upload(storagePath, toBytes(buf), {
+      .upload(videoPath, videoBuffer, {
         contentType: "video/mp4",
-        upsert: true,
+        upsert: false,
       });
 
-    const { data } = supabaseAdmin.storage
+    if (uploadVideoResult.error) {
+      return Response.json({ error: uploadVideoResult.error.message }, { status: 500 });
+    }
+
+    const videoPublicUrl = supabaseAdmin.storage.from("media").getPublicUrl(videoPath).data.publicUrl;
+
+    const { data: savedVideo, error: savedVideoError } = await supabaseAdmin
       .from("media")
-      .getPublicUrl(storagePath);
+      .insert({
+        type: "video",
+        title: generatedTitle,
+        idea: idea || null,
+        prompt: finalPrompt,
+        tool: "image-to-video",
+        url: videoPublicUrl,
+        storage_path: videoPath,
+        metadata: {
+          size,
+          seconds,
+          fit,
+          sourceImageUrl: imagePublicUrl,
+        },
+      })
+      .select()
+      .single();
 
-    const url = data.publicUrl;
+    if (savedVideoError) {
+      return Response.json({ error: savedVideoError.message }, { status: 500 });
+    }
 
-    await supabaseAdmin.from("media").upsert(
-      {
-        type: "image_to_video",
-        prompt: job.prompt ?? "",
-        url,
-        storage_path: storagePath,
+    await supabaseAdmin.from("media").insert({
+      type: "prompt",
+      title: generatedTitle,
+      idea: idea || null,
+      prompt: finalPrompt,
+      tool: "image-to-video",
+      url: null,
+      storage_path: null,
+      metadata: {
+        linkedVideoId: savedVideo?.id || null,
+        size,
+        seconds,
+        fit,
       },
-      { onConflict: "storage_path" }
-    );
+    });
 
     return Response.json({
-      status: "completed",
-      progress: 100,
-      downloadUrl: url,
+      url: videoPublicUrl,
+      prompt: finalPrompt,
+      item: savedVideo,
+      sourceImageUrl: imagePublicUrl,
     });
   } catch (err: any) {
-    console.error("GET image-to-video error:", err);
     return Response.json(
-      { error: err?.message ?? "Image-to-video status failed" },
+      { error: err?.message ?? "Something went wrong" },
       { status: 500 }
     );
   }

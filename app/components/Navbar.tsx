@@ -8,6 +8,7 @@ const navItems = [
   { href: "/tools/image-maker", label: "Image" },
   { href: "/tools/video-maker", label: "Video" },
   { href: "/tools/image-to-video", label: "Image to Video" },
+  { href: "/tools/turn-thought-into-prompt", label: "Thought to Prompt",},
   { href: "/tools/turn-thought-into-plan", label: "Plan" },
   { href: "/tools/library", label: "Library" },
 ];
