@@ -69,6 +69,32 @@ export default function ImageToVideoPage() {
     return URL.createObjectURL(imageFile);
   }, [imageFile]);
 
+  function buildFallbackMotionPrompt() {
+    return `The subject remains consistent with the uploaded image.
+
+Scene:
+${idea}
+
+Style:
+${styleHint || "realistic cinematic video"}
+
+Intensity:
+${intensity}
+
+Motion guidance:
+Natural, believable movement. Keep the action grounded and visually clear. Show the subjects performing the described activity in a way that matches the scene.
+
+Camera:
+Steady cinematic framing with realistic movement and readable composition.
+
+Rules:
+- no text, subtitles, logos, or watermarks
+- no surreal behavior
+- no random scene changes
+- no identity drift
+- no exaggerated motion unless clearly requested`;
+  }
+
   async function handleGeneratePrompt() {
     try {
       if (idea.trim().length < 5) {
@@ -94,15 +120,26 @@ export default function ImageToVideoPage() {
       const data = await res.json();
 
       if (!res.ok) {
-        alert(data.error || "Failed to generate motion prompt.");
+        const fallback = buildFallbackMotionPrompt();
+        setPrompt(fallback);
+        alert(data.error || "Prompt tool failed, so Zenavant built a fallback prompt instead.");
         return;
       }
 
       setPromptResult(data);
-      setPrompt(data.finalPrompt || "");
+
+      const candidate = (data.finalPrompt || "").trim();
+
+      const badPrompt =
+        !candidate ||
+        candidate.length < 40 ||
+        candidate === "The subject remains consistent with the uploaded image.";
+
+      setPrompt(badPrompt ? buildFallbackMotionPrompt() : candidate);
     } catch (err) {
       console.error(err);
-      alert("Something went wrong.");
+      setPrompt(buildFallbackMotionPrompt());
+      alert("Prompt tool failed, so Zenavant built a fallback prompt instead.");
     } finally {
       setLoadingPrompt(false);
     }
@@ -163,9 +200,19 @@ export default function ImageToVideoPage() {
         return;
       }
 
-      if (!prompt.trim() && idea.trim().length < 5) {
-        alert("Add a prompt or describe your idea first.");
+      if (!idea.trim() && !prompt.trim()) {
+        alert("Add an idea or prompt first.");
         return;
+      }
+
+      let finalPrompt = prompt.trim();
+
+      if (
+        !finalPrompt ||
+        finalPrompt === "The subject remains consistent with the uploaded image."
+      ) {
+        finalPrompt = buildFallbackMotionPrompt();
+        setPrompt(finalPrompt);
       }
 
       setLoadingVideo(true);
@@ -174,7 +221,7 @@ export default function ImageToVideoPage() {
       const formData = new FormData();
       formData.append("image", imageFile);
       formData.append("idea", idea);
-      formData.append("prompt", prompt);
+      formData.append("prompt", finalPrompt);
       formData.append("intensity", intensity);
       formData.append("size", size);
       formData.append("seconds", seconds);
@@ -196,7 +243,7 @@ export default function ImageToVideoPage() {
         return;
       }
 
-      if (data?.prompt && !prompt) {
+      if (data?.prompt) {
         setPrompt(data.prompt);
       }
 
