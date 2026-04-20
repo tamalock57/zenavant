@@ -82,6 +82,7 @@ export default function LibraryPage() {
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -156,6 +157,10 @@ export default function LibraryPage() {
     );
   }
 
+  function clearSelection() {
+    setSelectedIds([]);
+  }
+
   async function handleDeleteSelected() {
     try {
       if (selectedIds.length === 0) return;
@@ -163,11 +168,56 @@ export default function LibraryPage() {
       const ok = confirm("Delete selected items?");
       if (!ok) return;
 
-      alert("Delete is temporarily disabled in this version until API delete is wired.");
+      setDeleting(true);
+
+      const selectedItems = items.filter((item) => selectedIds.includes(item.id));
+      const storagePaths = selectedItems
+        .map((item) => item.storage_path)
+        .filter(Boolean) as string[];
+
+      if (storagePaths.length > 0) {
+        const { error: storageError } = await supabase.storage
+          .from("media")
+          .remove(storagePaths);
+
+        if (storageError) {
+          console.error(storageError);
+        }
+      }
+
+      const { error } = await supabase
+        .from("media")
+        .delete()
+        .in("id", selectedIds);
+
+      if (error) {
+        console.error(error);
+        alert("Delete failed");
+        return;
+      }
+
+      clearSelection();
+      await fetchLibrary();
     } catch (err) {
       console.error(err);
       alert("Delete failed");
+    } finally {
+      setDeleting(false);
     }
+  }
+
+  function handleDownload(item: Item) {
+    if (!item.mediaUrl) {
+      alert("This item has no downloadable file.");
+      return;
+    }
+
+    const link = document.createElement("a");
+    link.href = item.mediaUrl;
+    link.download = item.title || item.prompt || item.id;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   }
 
   const hasItems = useMemo(() => items.length > 0, [items]);
@@ -199,10 +249,10 @@ export default function LibraryPage() {
 
           <button
             onClick={handleDeleteSelected}
-            disabled={selectedIds.length === 0}
-            className="px-3 py-2 rounded-xl bg-red-500 text-white disabled:opacity-50"
+            disabled={selectedIds.length === 0 || deleting}
+            className="px-3 py-2 rounded-xl bg-red-400 text-white disabled:opacity-50"
           >
-            Delete
+            {deleting ? "Deleting..." : "Delete"}
           </button>
         </div>
       </div>
@@ -302,8 +352,19 @@ export default function LibraryPage() {
                 )}
               </div>
 
-              <div className="p-3 text-xs text-neutral-500 border-t border-neutral-300">
-                {formatDate(item.created_at)}
+              <div className="flex justify-between items-center gap-2 p-3 border-t border-neutral-300">
+                <div className="text-xs text-neutral-500">
+                  {formatDate(item.created_at)}
+                </div>
+
+                {item.mediaUrl ? (
+                  <button
+                    onClick={() => handleDownload(item)}
+                    className="px-3 py-1.5 rounded-lg bg-neutral-800 text-white text-xs"
+                  >
+                    Download
+                  </button>
+                ) : null}
               </div>
             </div>
           );

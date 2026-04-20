@@ -27,6 +27,7 @@ export default function ImageMakerPage() {
   const [intensity, setIntensity] = useState<"subtle" | "balanced" | "dramatic">("balanced");
   const [prompt, setPrompt] = useState("");
   const [size, setSize] = useState("1024x1024");
+  const [referenceImages, setReferenceImages] = useState<File[]>([]);
 
   const [loadingPrompt, setLoadingPrompt] = useState(false);
   const [loadingImage, setLoadingImage] = useState(false);
@@ -59,6 +60,15 @@ export default function ImageMakerPage() {
       mounted = false;
     };
   }, [router]);
+
+  // Restore Plan -> Use for Image
+  useEffect(() => {
+    const saved = localStorage.getItem("zenavant_prompt");
+    if (saved) {
+      setIdea(saved);
+      localStorage.removeItem("zenavant_prompt");
+    }
+  }, []);
 
   async function handleGeneratePrompt() {
     try {
@@ -122,6 +132,7 @@ export default function ImageMakerPage() {
             styleHint,
             intensity,
             size,
+            referenceCount: referenceImages.length,
           },
         }),
       });
@@ -152,15 +163,17 @@ export default function ImageMakerPage() {
       setLoadingImage(true);
       setGeneratedImageUrl("");
 
+      const formData = new FormData();
+      formData.append("prompt", prompt);
+      formData.append("size", size);
+
+      referenceImages.forEach((file) => {
+        formData.append("referenceImages", file);
+      });
+
       const res = await fetch("/api/image-maker", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          prompt,
-          size,
-        }),
+        body: formData,
       });
 
       const data = await res.json();
@@ -202,7 +215,7 @@ export default function ImageMakerPage() {
         <input
           value={styleHint}
           onChange={(e) => setStyleHint(e.target.value)}
-          placeholder="Optional style hint"
+          placeholder="Style hint (e.g., cinematic, Pixar, noir, realistic)"
           className="rounded-xl border border-neutral-300 bg-white p-3 text-black placeholder:text-neutral-500"
         />
 
@@ -211,9 +224,9 @@ export default function ImageMakerPage() {
           onChange={(e) => setIntensity(e.target.value as "subtle" | "balanced" | "dramatic")}
           className="rounded-xl border border-neutral-300 bg-white p-3 text-black"
         >
-          <option value="subtle">Make it more subtle</option>
+          <option value="subtle">Subtle</option>
           <option value="balanced">Balanced</option>
-          <option value="dramatic">Make it more dramatic</option>
+          <option value="dramatic">Dramatic</option>
         </select>
 
         <select
@@ -225,6 +238,29 @@ export default function ImageMakerPage() {
           <option value="1024x1536">1024x1536</option>
           <option value="1536x1024">1536x1024</option>
         </select>
+      </div>
+
+      <div className="space-y-2">
+        <label className="text-sm text-neutral-600">
+          Reference images (optional)
+        </label>
+
+        <input
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={(e) => {
+            const files = Array.from(e.target.files || []);
+            setReferenceImages(files);
+          }}
+          className="w-full rounded-xl border border-neutral-300 bg-white p-3 text-black"
+        />
+
+        {referenceImages.length > 0 && (
+          <div className="text-xs text-neutral-500">
+            {referenceImages.length} reference image(s) selected
+          </div>
+        )}
       </div>
 
       <button

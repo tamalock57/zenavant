@@ -23,6 +23,7 @@ export default function ImageToVideoPage() {
   const [checkingAuth, setCheckingAuth] = useState(true);
 
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [referenceImages, setReferenceImages] = useState<File[]>([]);
   const [idea, setIdea] = useState("");
   const [prompt, setPrompt] = useState("");
   const [styleHint, setStyleHint] = useState("");
@@ -33,6 +34,7 @@ export default function ImageToVideoPage() {
 
   const [loadingPrompt, setLoadingPrompt] = useState(false);
   const [loadingVideo, setLoadingVideo] = useState(false);
+  const [savingPrompt, setSavingPrompt] = useState(false);
 
   const [videoUrl, setVideoUrl] = useState("");
   const [promptResult, setPromptResult] = useState<PromptResult | null>(null);
@@ -96,21 +98,61 @@ export default function ImageToVideoPage() {
         return;
       }
 
-      const finalPrompt = [
-        "The subject remains consistent with the uploaded image.",
-        "",
-        data.finalPrompt || "",
-      ]
-        .join("\n")
-        .trim();
-
       setPromptResult(data);
-      setPrompt(finalPrompt);
+      setPrompt(data.finalPrompt || "");
     } catch (err) {
       console.error(err);
       alert("Something went wrong.");
     } finally {
       setLoadingPrompt(false);
+    }
+  }
+
+  async function handleSavePrompt() {
+    try {
+      if (!prompt.trim()) {
+        alert("No prompt to save.");
+        return;
+      }
+
+      setSavingPrompt(true);
+
+      const title = promptResult?.title || "Image to Video Prompt";
+
+      const res = await fetch("/api/save-prompt", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title,
+          idea,
+          prompt,
+          tool: "image-to-video",
+          metadata: {
+            styleHint,
+            intensity,
+            seconds,
+            size,
+            fit,
+            referenceCount: referenceImages.length,
+          },
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert(data.error || "Failed to save prompt.");
+        return;
+      }
+
+      alert("Prompt saved to Library.");
+    } catch (err) {
+      console.error(err);
+      alert("Failed to save prompt.");
+    } finally {
+      setSavingPrompt(false);
     }
   }
 
@@ -137,6 +179,10 @@ export default function ImageToVideoPage() {
       formData.append("size", size);
       formData.append("seconds", seconds);
       formData.append("fit", fit);
+
+      referenceImages.forEach((file) => {
+        formData.append("referenceImages", file);
+      });
 
       const res = await fetch("/api/image-to-video", {
         method: "POST",
@@ -183,6 +229,29 @@ export default function ImageToVideoPage() {
         className="w-full rounded-xl border border-neutral-300 bg-white p-3 text-black"
       />
 
+      <div className="space-y-2">
+        <label className="text-sm text-neutral-600">
+          Additional references (optional)
+        </label>
+
+        <input
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={(e) => {
+            const files = Array.from(e.target.files || []);
+            setReferenceImages(files);
+          }}
+          className="w-full rounded-xl border border-neutral-300 bg-white p-3 text-black"
+        />
+
+        {referenceImages.length > 0 && (
+          <div className="text-xs text-neutral-500">
+            {referenceImages.length} reference image(s) selected
+          </div>
+        )}
+      </div>
+
       {previewUrl && (
         <div className="rounded-2xl border border-neutral-300 bg-white p-4">
           <div className="mb-2 text-sm text-neutral-500">Preview</div>
@@ -205,7 +274,7 @@ export default function ImageToVideoPage() {
         <input
           value={styleHint}
           onChange={(e) => setStyleHint(e.target.value)}
-          placeholder="Optional style hint"
+          placeholder="Style hint (e.g., cinematic, Pixar, noir, realistic)"
           className="rounded-xl border border-neutral-300 bg-white p-3 text-black placeholder:text-neutral-500"
         />
 
@@ -214,9 +283,9 @@ export default function ImageToVideoPage() {
           onChange={(e) => setIntensity(e.target.value as "subtle" | "balanced" | "dramatic")}
           className="rounded-xl border border-neutral-300 bg-white p-3 text-black"
         >
-          <option value="subtle">Make it more subtle</option>
+          <option value="subtle">Subtle</option>
           <option value="balanced">Balanced</option>
-          <option value="dramatic">Make it more dramatic</option>
+          <option value="dramatic">Dramatic</option>
         </select>
 
         <select
@@ -262,6 +331,14 @@ export default function ImageToVideoPage() {
         placeholder="Your generated motion prompt will appear here..."
         className="w-full min-h-[220px] rounded-2xl border border-neutral-300 bg-white p-4 text-black placeholder:text-neutral-500"
       />
+
+      <button
+        onClick={handleSavePrompt}
+        disabled={savingPrompt}
+        className="w-full rounded-2xl bg-neutral-800 px-4 py-3 text-white disabled:opacity-50"
+      >
+        {savingPrompt ? "Saving..." : "Save Prompt to Library"}
+      </button>
 
       <button
         onClick={handleGenerateVideo}
