@@ -1,32 +1,42 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/tools/image-maker", label: "Image" },
   { href: "/tools/video-maker", label: "Video" },
   { href: "/tools/image-to-video", label: "Image to Video" },
-  { href: "/tools/turn-thought-into-prompt", label: "Thought to Prompt",},
+  { href: "/tools/turn-thought-into-prompt", label: "Thought to Prompt" },
   { href: "/tools/turn-thought-into-plan", label: "Plan" },
   { href: "/tools/library", label: "Library" },
 ];
 
 export default function Navbar() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    router.replace("/");
+    router.refresh();
+  }
 
   return (
-    <header className="border-b bg-white">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
-        <Link
-          href="/dashboard"
-          className="text-xl font-semibold tracking-tight text-black"
-        >
-          Zenavant
-        </Link>
+    <nav className="w-full border-b border-neutral-200 bg-white">
+      <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-4 md:flex-row md:items-center md:justify-between">
+        <div className="flex items-center gap-3">
+          <Link
+            href="/dashboard"
+            className="text-2xl font-semibold text-black"
+          >
+            Zenavant
+          </Link>
+        </div>
 
-        <nav className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap gap-3">
           {navItems.map((item) => {
             const active = pathname === item.href;
 
@@ -34,18 +44,25 @@ export default function Navbar() {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+                className={`rounded-2xl px-5 py-3 text-sm font-medium transition ${
                   active
                     ? "bg-black text-white"
-                    : "bg-gray-100 text-gray-800 hover:bg-gray-200"
+                    : "bg-neutral-100 text-black hover:bg-neutral-200"
                 }`}
               >
                 {item.label}
               </Link>
             );
           })}
-        </nav>
+
+          <button
+            onClick={handleLogout}
+            className="rounded-2xl bg-neutral-800 px-5 py-3 text-sm font-medium text-white hover:bg-black"
+          >
+            Logout
+          </button>
+        </div>
       </div>
-    </header>
+    </nav>
   );
 }

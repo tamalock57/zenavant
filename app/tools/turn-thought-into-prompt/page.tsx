@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
 
 type PromptResult = {
   title: string;
@@ -16,6 +18,10 @@ type PromptResult = {
 };
 
 export default function TurnThoughtIntoPromptPage() {
+  const router = useRouter();
+
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
   const [idea, setIdea] = useState("");
   const [mode, setMode] = useState<"image" | "image-to-video" | "video">("image");
   const [intensity, setIntensity] = useState<"subtle" | "balanced" | "dramatic">("balanced");
@@ -25,10 +31,35 @@ export default function TurnThoughtIntoPromptPage() {
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<PromptResult | null>(null);
 
+  useEffect(() => {
+    let mounted = true;
+
+    async function checkSession() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!mounted) return;
+
+      if (!session) {
+        router.replace("/");
+        return;
+      }
+
+      setCheckingAuth(false);
+    }
+
+    checkSession();
+
+    return () => {
+      mounted = false;
+    };
+  }, [router]);
+
   async function handleGenerate() {
     try {
       if (idea.trim().length < 5) {
-        alert("Please describe your idea first.");
+        alert("Please describe the idea first.");
         return;
       }
 
@@ -51,14 +82,14 @@ export default function TurnThoughtIntoPromptPage() {
       const data = await res.json();
 
       if (!res.ok) {
-        alert(data.error || "Failed to generate prompt");
+        alert(data.error || "Failed to build prompt.");
         return;
       }
 
       setResult(data);
     } catch (err) {
       console.error(err);
-      alert("Something went wrong");
+      alert("Something went wrong.");
     } finally {
       setLoading(false);
     }
@@ -102,7 +133,7 @@ export default function TurnThoughtIntoPromptPage() {
       const data = await res.json();
 
       if (!res.ok) {
-        alert(data.error || "Failed to save prompt");
+        alert(data.error || "Failed to save prompt.");
         return;
       }
 
@@ -115,22 +146,30 @@ export default function TurnThoughtIntoPromptPage() {
     }
   }
 
+  if (checkingAuth) {
+    return (
+      <div className="max-w-3xl mx-auto p-4 text-black">
+        Loading...
+      </div>
+    );
+  }
+
   return (
-    <div className="max-w-3xl mx-auto p-4 space-y-4">
-      <h1 className="text-2xl font-semibold text-white">Turn Thought Into Prompt</h1>
+    <div className="max-w-3xl mx-auto p-4 space-y-4 text-black">
+      <h1 className="text-2xl font-semibold">Turn Thought Into Prompt</h1>
 
       <textarea
         value={idea}
         onChange={(e) => setIdea(e.target.value)}
         placeholder="Describe the idea the way it comes to you..."
-        className="w-full min-h-[140px] rounded-2xl border border-neutral-700 bg-neutral-900 p-4 text-white"
+        className="w-full min-h-[140px] rounded-2xl border border-neutral-300 bg-white p-4 text-black placeholder:text-neutral-500"
       />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <select
           value={mode}
-          onChange={(e) => setMode(e.target.value as any)}
-          className="rounded-xl border border-neutral-700 bg-neutral-900 p-3 text-white"
+          onChange={(e) => setMode(e.target.value as "image" | "image-to-video" | "video")}
+          className="rounded-xl border border-neutral-300 bg-white p-3 text-black"
         >
           <option value="image">Image</option>
           <option value="image-to-video">Image to Video</option>
@@ -139,8 +178,8 @@ export default function TurnThoughtIntoPromptPage() {
 
         <select
           value={intensity}
-          onChange={(e) => setIntensity(e.target.value as any)}
-          className="rounded-xl border border-neutral-700 bg-neutral-900 p-3 text-white"
+          onChange={(e) => setIntensity(e.target.value as "subtle" | "balanced" | "dramatic")}
+          className="rounded-xl border border-neutral-300 bg-white p-3 text-black"
         >
           <option value="subtle">Make it more subtle</option>
           <option value="balanced">Balanced</option>
@@ -151,23 +190,23 @@ export default function TurnThoughtIntoPromptPage() {
           value={styleHint}
           onChange={(e) => setStyleHint(e.target.value)}
           placeholder="Optional style hint"
-          className="rounded-xl border border-neutral-700 bg-neutral-900 p-3 text-white"
+          className="rounded-xl border border-neutral-300 bg-white p-3 text-black placeholder:text-neutral-500"
         />
       </div>
 
       <button
         onClick={handleGenerate}
         disabled={loading}
-        className="w-full rounded-2xl bg-white px-4 py-3 text-black disabled:opacity-50"
+        className="w-full rounded-2xl bg-neutral-800 px-4 py-3 text-white disabled:opacity-50"
       >
-        {loading ? "Generating..." : "Build Prompt"}
+        {loading ? "Building Prompt..." : "Build Prompt"}
       </button>
 
       {result && (
-        <div className="space-y-3 rounded-2xl border border-neutral-800 bg-neutral-950 p-4 text-white">
+        <div className="space-y-3 rounded-2xl border border-neutral-300 bg-white p-4 text-black">
           <div>
             <div className="text-lg font-semibold">{result.title}</div>
-            <div className="text-sm text-neutral-400">{result.summary}</div>
+            <div className="text-sm text-neutral-500">{result.summary}</div>
           </div>
 
           <div className="grid gap-2 text-sm">
@@ -184,14 +223,14 @@ export default function TurnThoughtIntoPromptPage() {
             <textarea
               value={result.finalPrompt}
               readOnly
-              className="w-full min-h-[180px] rounded-xl border border-neutral-700 bg-neutral-900 p-3 text-white"
+              className="w-full min-h-[180px] rounded-xl border border-neutral-300 bg-white p-3 text-black"
             />
           </div>
 
           <button
             onClick={handleSavePrompt}
             disabled={saving}
-            className="w-full rounded-2xl bg-neutral-800 px-4 py-3 text-white disabled:opacity-50"
+            className="w-full rounded-2xl bg-black px-4 py-3 text-white disabled:opacity-50"
           >
             {saving ? "Saving..." : "Save Prompt to Library"}
           </button>

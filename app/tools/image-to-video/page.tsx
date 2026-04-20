@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
 
 type PromptResult = {
   title: string;
@@ -16,6 +18,10 @@ type PromptResult = {
 };
 
 export default function ImageToVideoPage() {
+  const router = useRouter();
+
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [idea, setIdea] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -27,8 +33,34 @@ export default function ImageToVideoPage() {
 
   const [loadingPrompt, setLoadingPrompt] = useState(false);
   const [loadingVideo, setLoadingVideo] = useState(false);
+
   const [videoUrl, setVideoUrl] = useState("");
   const [promptResult, setPromptResult] = useState<PromptResult | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function checkSession() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!mounted) return;
+
+      if (!session) {
+        router.replace("/");
+        return;
+      }
+
+      setCheckingAuth(false);
+    }
+
+    checkSession();
+
+    return () => {
+      mounted = false;
+    };
+  }, [router]);
 
   const previewUrl = useMemo(() => {
     if (!imageFile) return "";
@@ -38,7 +70,7 @@ export default function ImageToVideoPage() {
   async function handleGeneratePrompt() {
     try {
       if (idea.trim().length < 5) {
-        alert("Please describe your idea first.");
+        alert("Please describe the motion or reaction you want first.");
         return;
       }
 
@@ -46,7 +78,9 @@ export default function ImageToVideoPage() {
 
       const res = await fetch("/api/turn-thought-into-prompt", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           idea,
           mode: "image-to-video",
@@ -58,7 +92,7 @@ export default function ImageToVideoPage() {
       const data = await res.json();
 
       if (!res.ok) {
-        alert(data.error || "Failed to generate prompt");
+        alert(data.error || "Failed to generate motion prompt.");
         return;
       }
 
@@ -87,7 +121,7 @@ export default function ImageToVideoPage() {
         return;
       }
 
-      if (!prompt && idea.trim().length < 5) {
+      if (!prompt.trim() && idea.trim().length < 5) {
         alert("Add a prompt or describe your idea first.");
         return;
       }
@@ -112,7 +146,7 @@ export default function ImageToVideoPage() {
       const data = await res.json();
 
       if (!res.ok) {
-        alert(data.error || "Failed to generate video");
+        alert(data.error || "Failed to generate video.");
         return;
       }
 
@@ -130,20 +164,28 @@ export default function ImageToVideoPage() {
     }
   }
 
+  if (checkingAuth) {
+    return (
+      <div className="max-w-3xl mx-auto p-4 text-black">
+        Loading...
+      </div>
+    );
+  }
+
   return (
-    <div className="max-w-3xl mx-auto p-4 space-y-4">
-      <h1 className="text-2xl font-semibold text-white">Image to Video</h1>
+    <div className="max-w-3xl mx-auto p-4 space-y-4 text-black">
+      <h1 className="text-2xl font-semibold">Image to Video</h1>
 
       <input
         type="file"
         accept="image/*"
         onChange={(e) => setImageFile(e.target.files?.[0] || null)}
-        className="w-full text-white"
+        className="w-full rounded-xl border border-neutral-300 bg-white p-3 text-black"
       />
 
       {previewUrl && (
-        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-3">
-          <div className="mb-2 text-sm text-neutral-400">Preview</div>
+        <div className="rounded-2xl border border-neutral-300 bg-white p-4">
+          <div className="mb-2 text-sm text-neutral-500">Preview</div>
           <img
             src={previewUrl}
             alt="Preview"
@@ -156,7 +198,7 @@ export default function ImageToVideoPage() {
         value={idea}
         onChange={(e) => setIdea(e.target.value)}
         placeholder="Describe the motion or reaction you want..."
-        className="w-full min-h-[120px] rounded-2xl border border-neutral-700 bg-neutral-900 p-4 text-white"
+        className="w-full min-h-[120px] rounded-2xl border border-neutral-300 bg-white p-4 text-black placeholder:text-neutral-500"
       />
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
@@ -164,13 +206,13 @@ export default function ImageToVideoPage() {
           value={styleHint}
           onChange={(e) => setStyleHint(e.target.value)}
           placeholder="Optional style hint"
-          className="rounded-xl border border-neutral-700 bg-neutral-900 p-3 text-white"
+          className="rounded-xl border border-neutral-300 bg-white p-3 text-black placeholder:text-neutral-500"
         />
 
         <select
           value={intensity}
-          onChange={(e) => setIntensity(e.target.value as any)}
-          className="rounded-xl border border-neutral-700 bg-neutral-900 p-3 text-white"
+          onChange={(e) => setIntensity(e.target.value as "subtle" | "balanced" | "dramatic")}
+          className="rounded-xl border border-neutral-300 bg-white p-3 text-black"
         >
           <option value="subtle">Make it more subtle</option>
           <option value="balanced">Balanced</option>
@@ -179,8 +221,8 @@ export default function ImageToVideoPage() {
 
         <select
           value={seconds}
-          onChange={(e) => setSeconds(e.target.value as any)}
-          className="rounded-xl border border-neutral-700 bg-neutral-900 p-3 text-white"
+          onChange={(e) => setSeconds(e.target.value as "4" | "8" | "12")}
+          className="rounded-xl border border-neutral-300 bg-white p-3 text-black"
         >
           <option value="4">4 seconds</option>
           <option value="8">8 seconds</option>
@@ -190,7 +232,7 @@ export default function ImageToVideoPage() {
         <select
           value={size}
           onChange={(e) => setSize(e.target.value)}
-          className="rounded-xl border border-neutral-700 bg-neutral-900 p-3 text-white"
+          className="rounded-xl border border-neutral-300 bg-white p-3 text-black"
         >
           <option value="1280x720">1280x720</option>
           <option value="720x1280">720x1280</option>
@@ -200,7 +242,7 @@ export default function ImageToVideoPage() {
       <select
         value={fit}
         onChange={(e) => setFit(e.target.value)}
-        className="w-full rounded-xl border border-neutral-700 bg-neutral-900 p-3 text-white"
+        className="w-full rounded-xl border border-neutral-300 bg-white p-3 text-black"
       >
         <option value="preserve">Preserve</option>
         <option value="fill">Fill</option>
@@ -211,26 +253,26 @@ export default function ImageToVideoPage() {
         disabled={loadingPrompt}
         className="w-full rounded-2xl bg-neutral-800 px-4 py-3 text-white disabled:opacity-50"
       >
-        {loadingPrompt ? "Generating Prompt..." : "Generate Motion Prompt"}
+        {loadingPrompt ? "Generating Motion Prompt..." : "Generate Motion Prompt"}
       </button>
 
       <textarea
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
         placeholder="Your generated motion prompt will appear here..."
-        className="w-full min-h-[220px] rounded-2xl border border-neutral-700 bg-neutral-900 p-4 text-white"
+        className="w-full min-h-[220px] rounded-2xl border border-neutral-300 bg-white p-4 text-black placeholder:text-neutral-500"
       />
 
       <button
         onClick={handleGenerateVideo}
         disabled={loadingVideo}
-        className="w-full rounded-2xl bg-white px-4 py-3 text-black disabled:opacity-50"
+        className="w-full rounded-2xl bg-black px-4 py-3 text-white disabled:opacity-50"
       >
         {loadingVideo ? "Generating Video..." : "Generate Video"}
       </button>
 
       {videoUrl && (
-        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4">
+        <div className="rounded-2xl border border-neutral-300 bg-white p-4">
           <video
             src={videoUrl}
             controls
