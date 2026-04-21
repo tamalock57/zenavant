@@ -69,30 +69,75 @@ export default function ImageToVideoPage() {
     return URL.createObjectURL(imageFile);
   }, [imageFile]);
 
+  function getIntensityDirection() {
+    if (intensity === "subtle") {
+      return "Movement should stay minimal, calm, and realistic, with gentle body motion, light environmental motion, and no exaggerated action.";
+    }
+
+    if (intensity === "dramatic") {
+      return "Movement can be stronger and more expressive, but should still remain believable, grounded, and visually coherent.";
+    }
+
+    return "Movement should feel natural, readable, and cinematic, with moderate motion that supports the scene without becoming exaggerated.";
+  }
+
+  function getCameraDirection() {
+    if (idea.toLowerCase().includes("drive") || idea.toLowerCase().includes("car")) {
+      return "Use cinematic in-car framing with steady realistic motion, readable subject focus, and natural environmental movement outside the windows.";
+    }
+
+    if (
+      idea.toLowerCase().includes("walk") ||
+      idea.toLowerCase().includes("shopping") ||
+      idea.toLowerCase().includes("store") ||
+      idea.toLowerCase().includes("market")
+    ) {
+      return "Use smooth cinematic tracking or medium framing that keeps the subjects readable while showing enough environment to support the action.";
+    }
+
+    if (
+      idea.toLowerCase().includes("talk") ||
+      idea.toLowerCase().includes("conversation") ||
+      idea.toLowerCase().includes("sitting")
+    ) {
+      return "Use steady cinematic framing with subtle push-ins or natural handheld stability, keeping facial expression and body language clear.";
+    }
+
+    return "Use steady cinematic framing with realistic movement and clear readable composition.";
+  }
+
   function buildFallbackMotionPrompt() {
-    return `The subject remains consistent with the uploaded image.
+    const cleanedIdea = idea.trim();
+    const cleanedStyle = styleHint.trim();
 
-Scene:
-${idea}
+    const referenceLine =
+      referenceImages.length > 0
+        ? `Keep the main uploaded image as the primary subject reference, and use the additional uploaded reference images only to help preserve appearance, clothing, mood, and visual consistency.`
+        : `Keep the uploaded image as the primary subject reference throughout the shot.`;
 
-Style:
-${styleHint || "realistic cinematic video"}
+    const styleLine = cleanedStyle
+      ? `Visual style should feel ${cleanedStyle}, while still staying believable and grounded.`
+      : `Visual style should feel hyper-realistic, cinematic, and grounded in a believable world.`;
 
-Intensity:
-${intensity}
+    return `The subject must remain consistent with the uploaded image. Do not change identity, facial structure, body type, clothing logic, or overall visual character unless the user clearly asks for that.
 
-Motion guidance:
-Natural, believable movement. Keep the action grounded and visually clear. Show the subjects performing the described activity in a way that matches the scene.
+${referenceLine}
 
-Camera:
-Steady cinematic framing with realistic movement and readable composition.
+Create a single continuous video shot based on this idea: ${cleanedIdea}.
 
-Rules:
-- no text, subtitles, logos, or watermarks
-- no surreal behavior
-- no random scene changes
-- no identity drift
-- no exaggerated motion unless clearly requested`;
+The action in the shot should clearly reflect that idea in a literal, readable, visually specific way. Avoid vague motion. Show the subject or subjects actually doing the described action in a believable environment that fits the idea.
+
+${styleLine}
+
+${getIntensityDirection()}
+
+${getCameraDirection()}
+
+Preserve visual continuity, scene logic, and realistic motion from beginning to end. No random changes in location, props, wardrobe, age, lighting logic, or subject identity.
+
+Do not add text, subtitles, logos, captions, watermarks, surreal distortions, or unrelated action.
+
+The final result should feel like a clear, cinematic, hyper-realistic video shot built from the uploaded image and guided by the described action.`;
   }
 
   async function handleGeneratePrompt() {
@@ -132,8 +177,9 @@ Rules:
 
       const badPrompt =
         !candidate ||
-        candidate.length < 40 ||
-        candidate === "The subject remains consistent with the uploaded image.";
+        candidate.length < 80 ||
+        candidate === "The subject remains consistent with the uploaded image." ||
+        candidate.startsWith("The subject remains consistent with the uploaded image.\nScene:");
 
       setPrompt(badPrompt ? buildFallbackMotionPrompt() : candidate);
     } catch (err) {
@@ -321,13 +367,15 @@ Rules:
         <input
           value={styleHint}
           onChange={(e) => setStyleHint(e.target.value)}
-          placeholder="Style hint (e.g., cinematic, Pixar, noir, realistic)"
+          placeholder="Style hint (e.g., hyper-realistic, cinematic, moody, natural light)"
           className="rounded-xl border border-neutral-300 bg-white p-3 text-black placeholder:text-neutral-500"
         />
 
         <select
           value={intensity}
-          onChange={(e) => setIntensity(e.target.value as "subtle" | "balanced" | "dramatic")}
+          onChange={(e) =>
+            setIntensity(e.target.value as "subtle" | "balanced" | "dramatic")
+          }
           className="rounded-xl border border-neutral-300 bg-white p-3 text-black"
         >
           <option value="subtle">Subtle</option>
@@ -397,13 +445,10 @@ Rules:
 
       {videoUrl && (
         <div className="rounded-2xl border border-neutral-300 bg-white p-4">
-          <video
-            src={videoUrl}
-            controls
-            className="w-full rounded-xl"
-          />
+          <video src={videoUrl} controls className="w-full rounded-xl" />
         </div>
       )}
     </div>
   );
 }
+
