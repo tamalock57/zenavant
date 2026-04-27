@@ -212,7 +212,7 @@ export async function GET(req: Request) {
     const { data: { publicUrl } } = supabaseAdmin.storage.from("media").getPublicUrl(storagePath);
 
     await supabaseAdmin.from("media").upsert(
-      { type: "video", prompt: prediction.input?.prompt ?? "", url: publicUrl, storage_path: storagePath },
+      { type: "video", prompt: (prediction.input as any)?.prompt ?? "", url: publicUrl, storage_path: storagePath },
       { onConflict: "storage_path" }
     );
 
