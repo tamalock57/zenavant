@@ -1,63 +1,111 @@
-import OpenAI from "openai";
+import Replicate from "replicate";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+const replicate = new Replicate({
+  auth: process.env.REPLICATE_API_TOKEN,
 });
 
-function jsonError(message: string, status = 400) {
-  return Response.json({ error: message }, { status });
+function jsonError(message: string, status = 400, details?: string) {
+  return Response.json(
+    details ? { error: message, details } : { error: message },
+    { status }
+  );
 }
 
-function arrayBufferToUint8Array(buf: ArrayBuffer) {
-  return new Uint8Array(buf);
+async function uploadFileToSupabase(
+  file: File,
+  folder: string
+): Promise<string> {
+  const arrayBuffer = await file.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+  const path = `${folder}/${Date.now()}-${file.name.replace(/\s+/g, "-")}`;
+
+  const { error } = await supabaseAdmin.storage
+    .from("media")
+    .upload(path, buffer, {
+      contentType: file.type,
+      upsert: false,
+    });
+
+  if (error) throw new Error(`Upload failed: ${error.message}`);
+
+  return supabaseAdmin.storage.from("media").getPublicUrl(path).data.publicUrl;
 }
 
 export async function POST(req: Request) {
   try {
+    if (!process.env.REPLICATE_API_TOKEN) {
+      return jsonError("Missing REPLICATE_API_TOKEN", 500);
+    }
+
     const formData = await req.formData();
 
-    const prompt = String(formData.get("prompt") ?? "").trim();
-    const secondsRaw = String(formData.get("seconds") ?? "8").trim();
-    const size = String(formData.get("size") ?? "1280x720").trim();
+    const mode = (formData.get("mode") ?? "native-audio").toString();
+    const prompt = (formData.get("prompt") ?? "").toString().trim();
+    const seconds = Number(formData.get("seconds") ?? 5);
+    const audioFile = formData.get("audio") as File | null;
+    const imageFile = formData.get("image") as File | null;
 
-    if (!process.env.OPENAI_API_KEY) {
-      return jsonError("Missing OPENAI_API_KEY on server", 500);
+    if (!prompt) return jsonError("Prompt is required", 400);
+
+    let prediction: any;
+
+    if (mode === "native-audio") {
+      // Mode 1: Generate video with native audio using Seedance 2.0
+      prediction = await replicate.predictions.create({
+        model: "bytedance/seedance-2.0",
+        input: {
+          prompt,
+          duration: seconds,
+        },
+      });
+    } else if (mode === "audio-to-video") {
+      // Mode 2: Generate video from audio file + prompt
+      if (!audioFile) return jsonError("Audio file is required", 400);
+
+      const audioUrl = await uploadFileToSupabase(audioFile, "audio");
+
+      prediction = await replicate.predictions.create({
+        model: "wan-video/wan-2.2-s2v",
+        input: {
+          prompt,
+          audio: audioUrl,
+        },
+      });
+    } else if (mode === "audio-image-to-video") {
+      // Mode 3: Animate image with audio
+      if (!audioFile) return jsonError("Audio file is required", 400);
+      if (!imageFile) return jsonError("Image file is required", 400);
+
+      const audioUrl = await uploadFileToSupabase(audioFile, "audio");
+      const imageUrl = await uploadFileToSupabase(imageFile, "inputs");
+
+      prediction = await replicate.predictions.create({
+        model: "wan-video/wan-2.2-s2v",
+        input: {
+          prompt,
+          audio: audioUrl,
+          image: imageUrl,
+        },
+      });
+    } else {
+      return jsonError("Invalid mode", 400);
     }
-
-    if (!prompt) return jsonError("Missing prompt");
-
-    if (!["4", "8", "12"].includes(secondsRaw)) {
-      return jsonError("Seconds must be 4, 8, or 12");
-    }
-
-    if (!["1280x720", "720x1280"].includes(size)) {
-      return jsonError("Size must be 1280x720 or 720x1280");
-    }
-
-    const job = await openai.videos.create({
-      model: "sora-2",
-      prompt,
-      seconds: secondsRaw as "4" | "8" | "12",
-      size: size as "1280x720" | "720x1280",
-    });
 
     return Response.json({
-      id: job.id,
-      status: job.status,
-      progress: job.progress ?? 0,
+      id: prediction.id,
+      status: prediction.status,
+      progress: 0,
     });
   } catch (err: any) {
-    console.error("POST /api/audio-to-video error:", err);
-    return Response.json(
-      {
-        error: "Video generation failed",
-        details: err?.message ?? String(err),
-      },
-      { status: 500 }
+    console.error("AUDIO-TO-VIDEO POST ERROR:", err);
+    return jsonError(
+      "Video generation failed",
+      500,
+      err?.message ?? String(err)
     );
   }
 }
@@ -66,50 +114,45 @@ export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
     const id = url.searchParams.get("id");
+    const prompt = url.searchParams.get("prompt") ?? "";
 
-    if (!id) return jsonError("Missing id");
+    if (!id) return jsonError("Missing id", 400);
 
-    if (!process.env.OPENAI_API_KEY) {
-      return jsonError("Missing OPENAI_API_KEY on server", 500);
-    }
+    const prediction = await replicate.predictions.get(id);
 
-    const job = await openai.videos.retrieve(id);
-
-    if (job.status === "failed") {
-      return Response.json({
-        status: "failed",
-        progress: job.progress ?? 0,
-        error: job.error?.message ?? "Audio-video generation failed",
-      });
-    }
-
-    if (job.status !== "completed") {
-      return Response.json({
-        status: job.status,
-        progress: job.progress ?? 0,
-      });
-    }
-
-    // Stable path per job id so refreshes do not create duplicates
-    const storagePath = `videos/audio-to-video-${id}.mp4`;
-
-    // If already saved, return existing URL immediately
-    const { data: existingRow, error: existingError } = await supabaseAdmin
-      .from("media")
-      .select("id, url, storage_path")
-      .eq("type", "video")
-      .eq("storage_path", storagePath)
-      .maybeSingle();
-
-    if (existingError) {
+    if (prediction.status === "failed") {
       return Response.json(
         {
-          error: "Failed to check existing video",
-          details: existingError.message,
+          status: "failed",
+          progress: 0,
+          error: prediction.error ?? "Generation failed",
         },
         { status: 500 }
       );
     }
+
+    if (prediction.status !== "succeeded") {
+      return Response.json({
+        status:
+          prediction.status === "processing" ? "in_progress" : "queued",
+        progress: 0,
+      });
+    }
+
+    const videoUrl = Array.isArray(prediction.output)
+      ? prediction.output[0]
+      : prediction.output;
+
+    if (!videoUrl) return jsonError("No video URL in response", 500);
+
+    const storagePath = `videos/audio-to-video-${id}.mp4`;
+
+    // Check if already saved
+    const { data: existingRow } = await supabaseAdmin
+      .from("media")
+      .select("id, url")
+      .eq("storage_path", storagePath)
+      .maybeSingle();
 
     if (existingRow?.url) {
       return Response.json({
@@ -119,87 +162,50 @@ export async function GET(req: Request) {
       });
     }
 
-    const contentRes = await fetch(
-      `https://api.openai.com/v1/videos/${id}/content`,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        },
-      }
-    );
+    // Download and save
+    const videoRes = await fetch(videoUrl);
+    if (!videoRes.ok) return jsonError("Failed to download video", 500);
 
-    if (!contentRes.ok) {
-      const txt = await contentRes.text().catch(() => "");
-      return Response.json(
-        {
-          error: "Failed to download video content",
-          details: txt,
-        },
-        { status: 500 }
-      );
-    }
+    const arrayBuffer = await videoRes.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
 
-    const buf = await contentRes.arrayBuffer();
-    const bytes = arrayBufferToUint8Array(buf);
-
-    const upload = await supabaseAdmin.storage.from("media").upload(storagePath, bytes, {
-      contentType: "video/mp4",
-      upsert: true,
-    });
-
-    if (upload.error) {
-      return Response.json(
-        {
-          error: "Supabase upload failed",
-          details: upload.error.message,
-        },
-        { status: 500 }
-      );
-    }
-
-    const { data: publicData } = supabaseAdmin.storage
+    const { error: uploadError } = await supabaseAdmin.storage
       .from("media")
-      .getPublicUrl(storagePath);
+      .upload(storagePath, bytes, {
+        contentType: "video/mp4",
+        upsert: true,
+      });
 
-    const downloadUrl = publicData?.publicUrl;
-
-    if (!downloadUrl) {
-      return Response.json(
-        { error: "Failed to get public URL" },
-        { status: 500 }
-      );
+    if (uploadError) {
+      return jsonError("Supabase upload failed", 500, uploadError.message);
     }
 
-    const { error: dbError } = await supabaseAdmin.from("media").insert({
-      type: "video",
-      prompt: job.prompt ?? "",
-      url: downloadUrl,
-      storage_path: storagePath,
-    });
+    const {
+      data: { publicUrl },
+    } = supabaseAdmin.storage.from("media").getPublicUrl(storagePath);
 
-    if (dbError) {
-      return Response.json(
-        {
-          error: "DB insert failed",
-          details: dbError.message,
-        },
-        { status: 500 }
-      );
-    }
+    await supabaseAdmin.from("media").upsert(
+      {
+        type: "video",
+        prompt: prompt || (prediction.input as any)?.prompt || "",
+        url: publicUrl,
+        storage_path: storagePath,
+        tool: "audio-to-video",
+      },
+      { onConflict: "storage_path" }
+    );
 
     return Response.json({
       status: "completed",
       progress: 100,
-      downloadUrl,
+      downloadUrl: publicUrl,
     });
   } catch (err: any) {
-    console.error("GET /api/audio-to-video error:", err);
-    return Response.json(
-      {
-        error: "Failed to fetch video status/content",
-        details: err?.message ?? String(err),
-      },
-      { status: 500 }
+    console.error("AUDIO-TO-VIDEO GET ERROR:", err);
+    return jsonError(
+      "Status check failed",
+      500,
+      err?.message ?? String(err)
     );
   }
 }

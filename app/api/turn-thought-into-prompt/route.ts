@@ -79,9 +79,10 @@ Instructions:
 - No on-screen text, letters, subtitles, captions, logos, or watermarks unless explicitly requested.
 - Keep results realistic and production-ready.
 
-If mode is "image-to-video" or "video", the finalPrompt should include:
+If mode is "image-to-video", the finalPrompt should include:
 "The subject remains consistent with the uploaded image."
-ONLY when the output is intended to animate an uploaded image.
+ONLY for image-to-video mode, never for regular video or image mode.
+For video mode, describe the scene and action directly without referencing any uploaded image.
 `;
 }
 
@@ -103,24 +104,24 @@ export async function POST(req: Request) {
 
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-    const response = await client.responses.create({
-      model: "gpt-4o-mini",
-      temperature: 0.7,
-      input: [
-        { role: "system", content: buildSystemPrompt() },
-        {
-          role: "user",
-          content: buildUserPrompt({
-            idea,
-            mode,
-            intensity,
-            styleHint,
-          }),
-        },
-      ],
-    });
+    const response = await client.chat.completions.create({
+  model: "gpt-4o-mini",
+  temperature: 0.7,
+  messages: [
+    { role: "system", content: buildSystemPrompt() },
+    {
+      role: "user",
+      content: buildUserPrompt({
+        idea,
+        mode,
+        intensity,
+        styleHint,
+      }),
+    },
+  ],
+});
 
-    const text = response.output_text?.trim();
+const text = response.choices[0]?.message?.content?.trim();
 
     if (!text) {
       return Response.json({ error: "No prompt output returned" }, { status: 500 });

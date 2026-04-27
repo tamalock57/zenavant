@@ -1,277 +1,180 @@
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import Replicate from "replicate";
 
 export const runtime = "nodejs";
 
-function uint8ArrayFromArrayBuffer(buf: ArrayBuffer) {
-  return new Uint8Array(buf);
+const replicate = new Replicate({
+  auth: process.env.REPLICATE_API_TOKEN,
+});
+
+function jsonError(message: string, status = 400, details?: string) {
+  return Response.json(
+    details ? { error: message, details } : { error: message },
+    { status }
+  );
 }
 
-function randName(ext: string) {
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}.${ext}`;
+async function uploadAudioToSupabase(file: File): Promise<string> {
+  const arrayBuffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuffer);
+  const path = `audio/${Date.now()}-${file.name.replace(/\s+/g, "-")}`;
+
+  const { error } = await supabaseAdmin.storage
+    .from("media")
+    .upload(path, bytes, {
+      contentType: file.type || "audio/wav",
+      upsert: false,
+    });
+
+  if (error) throw new Error(`Audio upload failed: ${error.message}`);
+
+  return supabaseAdmin.storage.from("media").getPublicUrl(path).data.publicUrl;
 }
 
-
-/*
-STEP 1 — CREATE LIP SYNC JOB
-POST /api/lipsync
-*/
 export async function POST(req: Request) {
   try {
-
-    const token = process.env.REPLICATE_API_TOKEN;
-
-    if (!token) {
-      return Response.json(
-        { error: "Missing REPLICATE_API_TOKEN" },
-        { status: 500 }
-      );
+    if (!process.env.REPLICATE_API_TOKEN) {
+      return jsonError("Missing REPLICATE_API_TOKEN", 500);
     }
 
     const form = await req.formData();
-
     const videoUrl = String(form.get("videoUrl") ?? "").trim();
-    const audioFile = form.get("audio");
+    const audioFile = form.get("audio") as File | null;
+    const mode = String(form.get("mode") ?? "audio").trim();
+    const text = String(form.get("text") ?? "").trim();
 
-    if (!videoUrl) {
-      return Response.json(
-        { error: "Missing videoUrl" },
-        { status: 400 }
-      );
-    }
+    if (!videoUrl) return jsonError("Missing videoUrl", 400);
 
-    if (!(audioFile instanceof File)) {
-      return Response.json(
-        { error: "Missing audio file" },
-        { status: 400 }
-      );
-    }
+    let prediction: any;
 
+    if (mode === "text") {
+      // Text-driven lip sync
+      if (!text) return jsonError("Missing text for lip sync", 400);
 
-    /*
-    Upload WAV audio to Supabase
-    Replicate must access audio via URL
-    */
-
-    const audioBuffer = await audioFile.arrayBuffer();
-    const audioBytes = uint8ArrayFromArrayBuffer(audioBuffer);
-
-    const audioName = randName("wav");
-    const audioPath = `audio/${audioName}`;
-
-    const upload = await supabaseAdmin.storage
-      .from("media")
-      .upload(audioPath, audioBytes, {
-        contentType: "audio/wav",
-        upsert: false,
+      prediction = await replicate.predictions.create({
+        model: "kwaivgi/kling-lip-sync",
+        input: {
+          video: videoUrl,
+          mode: "text",
+          text,
+        },
       });
+    } else {
+      // Audio-driven lip sync
+      if (!audioFile) return jsonError("Missing audio file", 400);
 
-    if (upload.error) {
-      return Response.json(
-        {
-          error: "Supabase upload failed",
-          details: upload.error.message,
+      const audioUrl = await uploadAudioToSupabase(audioFile);
+
+      prediction = await replicate.predictions.create({
+        model: "kwaivgi/kling-lip-sync",
+        input: {
+          video: videoUrl,
+          mode: "audio",
+          audio: audioUrl,
         },
-        { status: 500 }
-      );
+      });
     }
-
-
-    /*
-    Get public audio URL
-    */
-
-    const { data: publicData } =
-      supabaseAdmin.storage
-        .from("media")
-        .getPublicUrl(audioPath);
-
-    const audioUrl = publicData?.publicUrl;
-
-    if (!audioUrl) {
-      return Response.json(
-        { error: "Failed to get public audio URL" },
-        { status: 500 }
-      );
-    }
-
-
-    /*
-    Create Replicate prediction
-    Lipsync-2 model
-    */
-
-    const createRes = await fetch(
-      "https://api.replicate.com/v1/predictions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-
-        body: JSON.stringify({
-
-          version:
-            "e4f176abd783cefe6a3964de7c951fa2b51a953e0b22431d36658c44d9233d3d",
-
-          input: {
-            video: videoUrl,
-            audio: audioUrl
-          }
-
-        })
-      }
-    );
-
-
-    const createText = await createRes.text();
-
-    let createJson: any = null;
-
-    try {
-      createJson = JSON.parse(createText);
-    } catch {}
-
-    if (!createRes.ok) {
-      return Response.json(
-        {
-          error: "Replicate create failed",
-          status: createRes.status,
-          details: createJson ?? createText
-        },
-        { status: 500 }
-      );
-    }
-
 
     return Response.json({
-      id: createJson.id,
-      status: createJson.status ?? "starting"
+      id: prediction.id,
+      status: prediction.status ?? "starting",
     });
-
   } catch (e: any) {
-
-    return Response.json(
-      {
-        error: "Lip sync crashed",
-        details: e?.message ?? String(e)
-      },
-      { status: 500 }
-    );
-
+    console.error("LIPSYNC POST ERROR:", e);
+    return jsonError("Lip sync failed", 500, e?.message ?? String(e));
   }
 }
 
-
-
-/*
-STEP 2 — POLL STATUS
-GET /api/lipsync?id=XXXX
-*/
 export async function GET(req: Request) {
-
   try {
-
-    const token = process.env.REPLICATE_API_TOKEN;
-
-    if (!token) {
-      return Response.json(
-        { error: "Missing REPLICATE_API_TOKEN" },
-        { status: 500 }
-      );
+    if (!process.env.REPLICATE_API_TOKEN) {
+      return jsonError("Missing REPLICATE_API_TOKEN", 500);
     }
 
     const { searchParams } = new URL(req.url);
-
     const id = searchParams.get("id");
 
-    if (!id) {
-      return Response.json(
-        { error: "Missing id" },
-        { status: 400 }
-      );
-    }
+    if (!id) return jsonError("Missing id", 400);
 
+    const prediction = await replicate.predictions.get(id);
 
-    const res = await fetch(
-      `https://api.replicate.com/v1/predictions/${id}`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      }
-    );
-
-
-    const text = await res.text();
-
-    let json: any = null;
-
-    try {
-      json = JSON.parse(text);
-    } catch {}
-
-
-    if (!res.ok) {
-      return Response.json(
-        {
-          error: "Replicate status failed",
-          status: res.status,
-          details: json ?? text
-        },
-        { status: 500 }
-      );
-    }
-
-
-    const st = json?.status;
-
-
-    if (st === "succeeded") {
-
-      const out = json?.output;
-
-      const downloadUrl =
-        typeof out === "string"
-          ? out
-          : Array.isArray(out)
-          ? out[0]
-          : null;
-
-
-      return Response.json({
-        status: "completed",
-        downloadUrl
-      });
-
-    }
-
-
-    if (st === "failed") {
-
+    if (prediction.status === "failed") {
       return Response.json({
         status: "failed",
-        error: json?.error ?? "Lip sync failed"
+        error: prediction.error ?? "Lip sync failed",
       });
-
     }
 
+    if (prediction.status !== "succeeded") {
+      return Response.json({
+        status: prediction.status === "processing" ? "processing" : "starting",
+      });
+    }
 
-    return Response.json({
-      status: st ?? "processing"
-    });
+    const output = prediction.output;
+    const downloadUrl =
+      typeof output === "string"
+        ? output
+        : Array.isArray(output)
+        ? output[0]
+        : null;
 
+    if (!downloadUrl) return jsonError("No output URL", 500);
 
-  } catch (e: any) {
+    // Save to Supabase
+    const storagePath = `videos/lipsync-${id}.mp4`;
 
-    return Response.json(
+    const { data: existingRow } = await supabaseAdmin
+      .from("media")
+      .select("id, url")
+      .eq("storage_path", storagePath)
+      .maybeSingle();
+
+    if (existingRow?.url) {
+      return Response.json({
+        status: "completed",
+        downloadUrl: existingRow.url,
+      });
+    }
+
+    const videoRes = await fetch(downloadUrl);
+    if (!videoRes.ok) return jsonError("Failed to download video", 500);
+
+    const arrayBuffer = await videoRes.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+
+    const { error: uploadError } = await supabaseAdmin.storage
+      .from("media")
+      .upload(storagePath, bytes, {
+        contentType: "video/mp4",
+        upsert: true,
+      });
+
+    if (uploadError) {
+      return jsonError("Supabase upload failed", 500, uploadError.message);
+    }
+
+    const { data: { publicUrl } } = supabaseAdmin.storage
+      .from("media")
+      .getPublicUrl(storagePath);
+
+    await supabaseAdmin.from("media").upsert(
       {
-        error: "Status check crashed",
-        details: e?.message ?? String(e)
+        type: "video",
+        prompt: "",
+        url: publicUrl,
+        storage_path: storagePath,
+        tool: "lip-sync",
       },
-      { status: 500 }
+      { onConflict: "storage_path" }
     );
 
+    return Response.json({
+      status: "completed",
+      downloadUrl: publicUrl,
+    });
+  } catch (e: any) {
+    console.error("LIPSYNC GET ERROR:", e);
+    return jsonError("Status check failed", 500, e?.message ?? String(e));
   }
 }
-

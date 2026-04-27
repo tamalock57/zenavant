@@ -11,72 +11,54 @@ export async function POST(req: Request) {
       return Response.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
     }
 
-    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      return Response.json(
-        { error: "Missing SUPABASE_SERVICE_ROLE_KEY" },
-        { status: 500 }
-      );
-    }
-
     if (!thought || typeof thought !== "string") {
       return Response.json({ error: "Missing thought" }, { status: 400 });
     }
 
-    const client = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
+    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-    const response = await client.responses.create({
+    const response = await client.chat.completions.create({
       model: "gpt-4o-mini",
-      input: [
+      temperature: 0.7,
+      messages: [
         {
           role: "system",
-          content:
-            "You are Zenavant: calm, warm, practical, and encouraging. Keep things grounded and specific. No hype. No emojis. Make the plan feel doable and kind.",
+          content: `You are Zenavant: calm, warm, practical, and encouraging. Keep things grounded and specific. No hype. No emojis. Make the plan feel doable and kind.
+
+Return ONLY valid JSON with this exact structure, nothing else:
+{
+  "title": "",
+  "summary": "",
+  "steps": ["step 1", "step 2", "step 3"],
+  "firstTinyAction": "",
+  "encouragement": ""
+}
+
+Rules:
+- steps must be 3 to 6 plain English steps
+- Each step max 160 characters
+- No timestamps, codes, or random numbers
+- No markdown, no extra text outside the JSON`,
         },
         {
           role: "user",
           content: thought,
         },
       ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: "turn_thought_into_plan",
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              title: { type: "string" },
-              summary: { type: "string" },
-              steps: {
-                type: "array",
-                minItems: 3,
-                maxItems: 6,
-                items: {
-                  type: "string",
-                  maxLength: 160,
-                  description:
-                    "One short plain-English step. No codes, no timestamps, no random numbers.",
-                },
-              },
-              firstTinyAction: { type: "string" },
-              encouragement: { type: "string" },
-            },
-            required: [
-              "title",
-              "summary",
-              "steps",
-              "firstTinyAction",
-              "encouragement",
-            ],
-          },
-        },
-      },
     });
 
-    const jsonText = response.output_text?.trim() ?? "";
-    const data = JSON.parse(jsonText);
+    const jsonText = response.choices[0]?.message?.content?.trim() ?? "";
+
+    let data: any;
+    try {
+      const clean = jsonText.replace(/```json|```/g, "").trim();
+      data = JSON.parse(clean);
+    } catch {
+      return Response.json(
+        { error: "Failed to parse plan response", details: jsonText },
+        { status: 500 }
+      );
+    }
 
     const rawSteps = Array.isArray(data.steps)
       ? data.steps
@@ -119,7 +101,6 @@ export async function POST(req: Request) {
     });
   } catch (error: any) {
     console.error("Turn-thought-into-plan error:", error);
-
     return Response.json(
       {
         error: "Turn-thought-into-plan failed",

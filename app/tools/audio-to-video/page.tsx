@@ -1,81 +1,133 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
 
-const SIZE_OPTIONS = [
-  { value: "1280x720", label: "1280x720 (Landscape)" },
-  { value: "720x1280", label: "720x1280 (Portrait)" },
+type JobStatus = "queued" | "in_progress" | "completed" | "failed";
+type Mode = "native-audio" | "audio-to-video" | "audio-image-to-video";
+
+const MODES = [
+  {
+    value: "native-audio",
+    label: "Generate Video with Native Audio",
+    description: "Text prompt only — generates a video with natural sound included",
+  },
+  {
+    value: "audio-to-video",
+    label: "Generate Video from Audio File",
+    description: "Upload an audio file — generates visuals that match the audio",
+  },
+  {
+    value: "audio-image-to-video",
+    label: "Animate Image with Audio",
+    description: "Upload an audio file and an image — animates the image to match the audio",
+  },
 ];
 
-const SECOND_OPTIONS = ["4", "8", "12"];
-
 export default function AudioToVideoPage() {
-  const handled = useRef(false);
+  const router = useRouter();
 
-  const [file, setFile] = useState<File | null>(null);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+  const [mode, setMode] = useState<Mode>("native-audio");
   const [prompt, setPrompt] = useState("");
-  const [seconds, setSeconds] = useState("8");
-  const [size, setSize] = useState("1280x720");
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
+  const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [seconds, setSeconds] = useState("5");
+
   const [loading, setLoading] = useState(false);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const pollTimer = useRef<number | null>(null);
+
   useEffect(() => {
-    if (!jobId) return;
-    if (status === "completed" || status === "failed") return;
+    let mounted = true;
 
-    const timer = setInterval(async () => {
-      try {
-        const res = await fetch(
-          `/api/audio-to-video?id=${encodeURIComponent(jobId)}`,
-          { cache: "no-store" }
-        );
-        const data = await res.json();
+    async function checkSession() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!mounted) return;
+      if (!session) { router.replace("/"); return; }
+      setCheckingAuth(false);
+    }
 
-        if (!res.ok) {
-          setError(data?.error || "Failed to refresh status");
-          setLoading(false);
-          return;
-        }
+    checkSession();
+    return () => { mounted = false; };
+  }, [router]);
 
-        setStatus(data.status);
+  useEffect(() => {
+    return () => stopPolling();
+  }, []);
 
-        if (data.status === "completed" && !handled.current) {
-          handled.current = true;
-          setVideoUrl(data.downloadUrl || null);
-          setLoading(false);
-        }
+  function stopPolling() {
+    if (pollTimer.current) {
+      window.clearInterval(pollTimer.current);
+      pollTimer.current = null;
+    }
+  }
 
-        if (data.status === "failed") {
-          setError(data?.error || "Video generation failed");
-          setLoading(false);
-        }
-      } catch (e: any) {
-        setError(e?.message || "Something went wrong");
+  async function pollStatus(id: string) {
+    try {
+      const res = await fetch(
+        `/api/audio-to-video?id=${encodeURIComponent(id)}&prompt=${encodeURIComponent(prompt)}`,
+        { cache: "no-store" }
+      );
+
+      const data = await res.json();
+
+      if (data.status === "completed") {
+        setJobStatus("completed");
+        setVideoUrl(data.downloadUrl);
         setLoading(false);
+        stopPolling();
+      } else if (data.status === "failed") {
+        setJobStatus("failed");
+        setError(data.error || "Generation failed");
+        setLoading(false);
+        stopPolling();
+      } else {
+        setJobStatus(
+          data.status === "in_progress" ? "in_progress" : "queued"
+        );
       }
-    }, 3000);
-
-    return () => clearInterval(timer);
-  }, [jobId, status]);
+    } catch (err) {
+      console.error(err);
+    }
+  }
 
   async function generate() {
-    handled.current = false;
+    if (!prompt.trim()) {
+      alert("Please add a prompt first.");
+      return;
+    }
+
+    if (mode !== "native-audio" && !audioFile) {
+      alert("Please upload an audio file.");
+      return;
+    }
+
+    if (mode === "audio-image-to-video" && !imageFile) {
+      alert("Please upload an image file.");
+      return;
+    }
+
+    stopPolling();
     setLoading(true);
     setError(null);
     setVideoUrl(null);
     setJobId(null);
-    setStatus(null);
+    setJobStatus(null);
 
     try {
       const fd = new FormData();
-
-      if (file) fd.append("audio", file);
+      fd.append("mode", mode);
       fd.append("prompt", prompt);
       fd.append("seconds", seconds);
-      fd.append("size", size);
+
+      if (audioFile) fd.append("audio", audioFile);
+      if (imageFile) fd.append("image", imageFile);
 
       const res = await fetch("/api/audio-to-video", {
         method: "POST",
@@ -85,227 +137,166 @@ export default function AudioToVideoPage() {
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data?.error || "Video generation failed");
+        setError(data?.error || "Generation failed");
         setLoading(false);
         return;
       }
 
       setJobId(data.id);
-      setStatus(data.status);
+      setJobStatus("queued");
+
+      pollTimer.current = window.setInterval(() => {
+        pollStatus(data.id);
+      }, 3000) as unknown as number;
     } catch (e: any) {
       setError(e?.message || "Something went wrong");
       setLoading(false);
     }
   }
 
-  return (
-    <main style={{ maxWidth: 760, margin: "0 auto", padding: 24 }}>
-      <h1 style={{ fontSize: 34, fontWeight: 750, marginBottom: 6 }}>
-        Audio → Video
-      </h1>
+  if (checkingAuth) {
+    return <div className="max-w-3xl mx-auto p-4 text-black">Loading...</div>;
+  }
 
-      <p style={{ opacity: 0.8, marginTop: 0 }}>
-        Upload audio and generate a visual story around it.
+  const selectedMode = MODES.find((m) => m.value === mode);
+
+  return (
+    <main className="max-w-3xl mx-auto p-6 space-y-4 text-black">
+      <h1 className="text-2xl md:text-3xl font-semibold">Audio to Video</h1>
+      <p className="text-neutral-600">
+        Generate videos with audio, from audio, or animate images with sound.
       </p>
 
-      <div
-        style={{
-          marginTop: 16,
-          padding: 16,
-          border: "1px solid rgba(0,0,0,0.12)",
-          borderRadius: 12,
-          background: "#fff",
-        }}
-      >
+      <div className="rounded-2xl border border-neutral-300 bg-white p-4 space-y-4">
+
+        {/* Mode Selector */}
         <div>
-          <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
-            Upload Audio
-          </label>
-
-          <label
-            htmlFor="audio-upload"
-            style={{
-              display: "inline-block",
-              padding: "10px 14px",
-              borderRadius: 10,
-              border: "1px solid rgba(0,0,0,0.2)",
-              background: "#fff",
-              cursor: "pointer",
-              fontWeight: 600,
-            }}
+          <label className="block font-semibold mb-2">Mode</label>
+          <select
+            value={mode}
+            onChange={(e) => setMode(e.target.value as Mode)}
+            className="w-full rounded-xl border border-neutral-300 bg-white p-3 text-black"
           >
-            Choose File
-          </label>
-
-          <input
-            id="audio-upload"
-            type="file"
-            accept=".mp3,.wav,.mp4"
-            style={{ display: "none" }}
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          />
-
-          <div style={{ marginTop: 8, fontSize: 14, opacity: 0.8 }}>
-            {file?.name || "No file chosen"}
-          </div>
+            {MODES.map((m) => (
+              <option key={m.value} value={m.value}>{m.label}</option>
+            ))}
+          </select>
+          {selectedMode && (
+            <p className="mt-1 text-sm text-neutral-500">
+              {selectedMode.description}
+            </p>
+          )}
         </div>
 
-        <div style={{ marginTop: 12 }}>
-          <label style={{ display: "block", fontWeight: 650, marginBottom: 8 }}>
-            Describe Visuals
-          </label>
+        {/* Audio Upload */}
+        {(mode === "audio-to-video" || mode === "audio-image-to-video") && (
+          <div>
+            <label className="block font-semibold mb-2">Upload Audio</label>
+            <input
+              type="file"
+              accept=".mp3,.wav,.mp4,.m4a"
+              onChange={(e) => setAudioFile(e.target.files?.[0] ?? null)}
+              className="w-full rounded-xl border border-neutral-300 bg-white p-3 text-black"
+            />
+            {audioFile && (
+              <p className="mt-1 text-sm text-neutral-500">{audioFile.name}</p>
+            )}
+          </div>
+        )}
 
+        {/* Image Upload */}
+        {mode === "audio-image-to-video" && (
+          <div>
+            <label className="block font-semibold mb-2">Upload Image</label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => setImageFile(e.target.files?.[0] ?? null)}
+              className="w-full rounded-xl border border-neutral-300 bg-white p-3 text-black"
+            />
+            {imageFile && (
+              <p className="mt-1 text-sm text-neutral-500">{imageFile.name}</p>
+            )}
+          </div>
+        )}
+
+        {/* Prompt */}
+        <div>
+          <label className="block font-semibold mb-2">
+            {mode === "native-audio"
+              ? "Describe the video and audio"
+              : "Describe the visuals"}
+          </label>
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Describe visuals..."
+            placeholder={
+              mode === "native-audio"
+                ? "A calm rainy street at night with soft jazz playing..."
+                : "Describe what the visuals should look like..."
+            }
             rows={4}
-            style={{
-              width: "100%",
-              padding: 12,
-              fontSize: 16,
-              borderRadius: 10,
-              border: "1px solid rgba(0,0,0,0.18)",
-              boxSizing: "border-box",
-            }}
+            className="w-full rounded-2xl border border-neutral-300 bg-white p-4 text-black placeholder:text-neutral-500"
           />
         </div>
 
-        <div
-          style={{
-            display: "flex",
-            gap: 12,
-            flexWrap: "wrap",
-            marginTop: 12,
-            alignItems: "end",
-          }}
-        >
-          <div>
-            <label
-              style={{
-                display: "block",
-                fontSize: 14,
-                marginBottom: 6,
-                opacity: 0.85,
-              }}
-            >
-              Video Length
-            </label>
-
-            <select
-              value={seconds}
-              onChange={(e) => setSeconds(e.target.value)}
-              style={{
-                padding: "10px 12px",
-                fontSize: 16,
-                borderRadius: 10,
-                border: "1px solid rgba(0,0,0,0.2)",
-                background: "#fff",
-              }}
-            >
-              {SECOND_OPTIONS.map((s) => (
-                <option key={s} value={s}>
-                  {s} seconds
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label
-              style={{
-                display: "block",
-                fontSize: 14,
-                marginBottom: 6,
-                opacity: 0.85,
-              }}
-            >
-              Size
-            </label>
-
-            <select
-              value={size}
-              onChange={(e) => setSize(e.target.value)}
-              style={{
-                padding: "10px 12px",
-                fontSize: 16,
-                borderRadius: 10,
-                border: "1px solid rgba(0,0,0,0.2)",
-                background: "#fff",
-              }}
-            >
-              {SIZE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
+        {/* Duration */}
+        <div>
+          <label className="block text-sm font-medium text-neutral-700 mb-1">
+            Duration
+          </label>
+          <select
+            value={seconds}
+            onChange={(e) => setSeconds(e.target.value)}
+            className="w-full rounded-xl border border-neutral-300 bg-white p-3 text-black"
+          >
+            <option value="4">4 seconds</option>
+            <option value="5">5 seconds</option>
+            <option value="8">8 seconds</option>
+            <option value="10">10 seconds</option>
+          </select>
         </div>
 
+        {/* Generate Button */}
         <button
           onClick={generate}
           disabled={loading}
-          style={{
-            marginTop: 12,
-            padding: "10px 14px",
-            fontSize: 16,
-            borderRadius: 10,
-            border: "1px solid rgba(0,0,0,0.2)",
-            background: loading ? "rgba(0,0,0,0.08)" : "#111",
-            color: loading ? "#444" : "#fff",
-            cursor: loading ? "not-allowed" : "pointer",
-            fontWeight: 600,
-          }}
+          className="w-full rounded-2xl bg-black px-4 py-3 text-white disabled:opacity-50"
         >
-          {loading ? "Working..." : "Generate Video"}
+          {loading ? "Generating..." : "Generate Video"}
         </button>
 
-        <div style={{ marginTop: 16, fontSize: 16 }}>
-          <div>
-            <b>Status:</b> {status ?? "—"}
-          </div>
-        </div>
+        <p className="text-sm text-neutral-500">
+          Keep this page open while generating.
+        </p>
 
+        {/* Status */}
+        {jobStatus && jobStatus !== "completed" && (
+          <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700">
+            <b>Status:</b> {jobStatus}
+          </div>
+        )}
+
+        {/* Error */}
         {error && (
-          <div
-            style={{
-              marginTop: 12,
-              padding: 12,
-              borderRadius: 10,
-              border: "1px solid rgba(220,38,38,0.25)",
-              background: "rgba(254,242,242,1)",
-              color: "#991b1b",
-            }}
-          >
+          <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-red-700">
             {error}
           </div>
         )}
       </div>
 
+      {/* Result */}
       {videoUrl && (
-        <section
-          style={{
-            marginTop: 18,
-            padding: 16,
-            border: "1px solid rgba(0,0,0,0.12)",
-            borderRadius: 12,
-            background: "#fff",
-          }}
-        >
-          <h2 style={{ fontSize: 18, fontWeight: 750, marginTop: 0 }}>
-            Result
-          </h2>
-
-          <video
-            controls
-            src={videoUrl}
-            style={{
-              width: "100%",
-              borderRadius: 10,
-              marginTop: 10,
-            }}
-          />
+        <section className="rounded-2xl border border-neutral-300 bg-white p-4">
+          <h2 className="text-lg font-semibold mb-4">Result</h2>
+          <video controls src={videoUrl} className="w-full rounded-xl" />
+          
+            href={videoUrl}
+            download
+            className="mt-2 inline-block text-sm text-black underline"
+          <a>
+            Download video
+          </a>
         </section>
       )}
     </main>

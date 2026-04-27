@@ -1,159 +1,89 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
-type PromptResult = {
-  title: string;
-  summary: string;
-  subject: string;
-  setting: string;
-  action: string;
-  emotion: string;
-  camera: string;
-  style: string;
-  rules: string[];
-  finalPrompt: string;
-};
+type JobStatus = "queued" | "in_progress" | "completed" | "failed";
+
+const I2V_MODELS = [
+  { value: "bytedance/seedance-1-pro", label: "Seedance 1 Pro" },
+  { value: "bytedance/seedance-2.0", label: "Seedance 2.0" },
+  { value: "kwaivgi/kling-v2.5-turbo-pro", label: "Kling v2.5 Turbo" },
+  { value: "kwaivgi/kling-v3-omni-video", label: "Kling v3 Omni" },
+  { value: "minimax/video-01", label: "Minimax Video-01" },
+  { value: "minimax/hailuo-02", label: "Hailuo 2" },
+  { value: "wan-video/wan-2.5-i2v", label: "Wan 2.5 Image-to-Video" },
+  { value: "wan-video/wan-2.2-i2v-fast", label: "Wan 2.2 Fast" },
+  { value: "lightricks/ltx-video", label: "LTX Video" },
+  { value: "google/veo-2", label: "Veo 2 text prompt only" },
+];
 
 export default function ImageToVideoPage() {
   const router = useRouter();
 
   const [checkingAuth, setCheckingAuth] = useState(true);
-
   const [imageFile, setImageFile] = useState<File | null>(null);
-  const [referenceImages, setReferenceImages] = useState<File[]>([]);
   const [idea, setIdea] = useState("");
   const [prompt, setPrompt] = useState("");
   const [styleHint, setStyleHint] = useState("");
   const [intensity, setIntensity] = useState<"subtle" | "balanced" | "dramatic">("balanced");
-  const [seconds, setSeconds] = useState<"4" | "8" | "12">("4");
+  const [modelId, setModelId] = useState("bytedance/seedance-1-pro");
+  const [seconds, setSeconds] = useState("5");
   const [size, setSize] = useState("1280x720");
-  const [fit, setFit] = useState("preserve");
 
   const [loadingPrompt, setLoadingPrompt] = useState(false);
-  const [loadingVideo, setLoadingVideo] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [savingPrompt, setSavingPrompt] = useState(false);
 
-  const [videoUrl, setVideoUrl] = useState("");
-  const [promptResult, setPromptResult] = useState<PromptResult | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let mounted = true;
-
-    async function checkSession() {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!mounted) return;
-
-      if (!session) {
-        router.replace("/");
-        return;
-      }
-
-      setCheckingAuth(false);
-    }
-
-    checkSession();
-
-    return () => {
-      mounted = false;
-    };
-  }, [router]);
+  const pollTimer = useRef<number | null>(null);
 
   const previewUrl = useMemo(() => {
     if (!imageFile) return "";
     return URL.createObjectURL(imageFile);
   }, [imageFile]);
 
-  function getIntensityDirection() {
-    if (intensity === "subtle") {
-      return "Movement should stay minimal, calm, and realistic, with gentle body motion, light environmental motion, and no exaggerated action.";
+  useEffect(() => {
+    let mounted = true;
+
+    async function checkSession() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!mounted) return;
+      if (!session) { router.replace("/"); return; }
+      setCheckingAuth(false);
     }
 
-    if (intensity === "dramatic") {
-      return "Movement can be stronger and more expressive, but should still remain believable, grounded, and visually coherent.";
+    checkSession();
+    return () => { mounted = false; };
+  }, [router]);
+
+  useEffect(() => {
+    return () => stopPolling();
+  }, []);
+
+  function stopPolling() {
+    if (pollTimer.current) {
+      window.clearInterval(pollTimer.current);
+      pollTimer.current = null;
     }
-
-    return "Movement should feel natural, readable, and cinematic, with moderate motion that supports the scene without becoming exaggerated.";
-  }
-
-  function getCameraDirection() {
-    if (idea.toLowerCase().includes("drive") || idea.toLowerCase().includes("car")) {
-      return "Use cinematic in-car framing with steady realistic motion, readable subject focus, and natural environmental movement outside the windows.";
-    }
-
-    if (
-      idea.toLowerCase().includes("walk") ||
-      idea.toLowerCase().includes("shopping") ||
-      idea.toLowerCase().includes("store") ||
-      idea.toLowerCase().includes("market")
-    ) {
-      return "Use smooth cinematic tracking or medium framing that keeps the subjects readable while showing enough environment to support the action.";
-    }
-
-    if (
-      idea.toLowerCase().includes("talk") ||
-      idea.toLowerCase().includes("conversation") ||
-      idea.toLowerCase().includes("sitting")
-    ) {
-      return "Use steady cinematic framing with subtle push-ins or natural handheld stability, keeping facial expression and body language clear.";
-    }
-
-    return "Use steady cinematic framing with realistic movement and clear readable composition.";
-  }
-
-  function buildFallbackMotionPrompt() {
-    const cleanedIdea = idea.trim();
-    const cleanedStyle = styleHint.trim();
-
-    const referenceLine =
-      referenceImages.length > 0
-        ? `Keep the main uploaded image as the primary subject reference, and use the additional uploaded reference images only to help preserve appearance, clothing, mood, and visual consistency.`
-        : `Keep the uploaded image as the primary subject reference throughout the shot.`;
-
-    const styleLine = cleanedStyle
-      ? `Visual style should feel ${cleanedStyle}, while still staying believable and grounded.`
-      : `Visual style should feel hyper-realistic, cinematic, and grounded in a believable world.`;
-
-    return `The subject must remain consistent with the uploaded image. Do not change identity, facial structure, body type, clothing logic, or overall visual character unless the user clearly asks for that.
-
-${referenceLine}
-
-Create a single continuous video shot based on this idea: ${cleanedIdea}.
-
-The action in the shot should clearly reflect that idea in a literal, readable, visually specific way. Avoid vague motion. Show the subject or subjects actually doing the described action in a believable environment that fits the idea.
-
-${styleLine}
-
-${getIntensityDirection()}
-
-${getCameraDirection()}
-
-Preserve visual continuity, scene logic, and realistic motion from beginning to end. No random changes in location, props, wardrobe, age, lighting logic, or subject identity.
-
-Do not add text, subtitles, logos, captions, watermarks, surreal distortions, or unrelated action.
-
-The final result should feel like a clear, cinematic, hyper-realistic video shot built from the uploaded image and guided by the described action.`;
   }
 
   async function handleGeneratePrompt() {
+    if (idea.trim().length < 5) {
+      alert("Please describe the motion you want first.");
+      return;
+    }
+
+    setLoadingPrompt(true);
     try {
-      if (idea.trim().length < 5) {
-        alert("Please describe the motion or reaction you want first.");
-        return;
-      }
-
-      setLoadingPrompt(true);
-
       const res = await fetch("/api/turn-thought-into-prompt", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           idea,
           mode: "image-to-video",
@@ -163,73 +93,35 @@ The final result should feel like a clear, cinematic, hyper-realistic video shot
       });
 
       const data = await res.json();
-
-      if (!res.ok) {
-        const fallback = buildFallbackMotionPrompt();
-        setPrompt(fallback);
-        alert(data.error || "Prompt tool failed, so Zenavant built a fallback prompt instead.");
-        return;
-      }
-
-      setPromptResult(data);
-
-      const candidate = (data.finalPrompt || "").trim();
-
-      const badPrompt =
-        !candidate ||
-        candidate.length < 80 ||
-        candidate === "The subject remains consistent with the uploaded image." ||
-        candidate.startsWith("The subject remains consistent with the uploaded image.\nScene:");
-
-      setPrompt(badPrompt ? buildFallbackMotionPrompt() : candidate);
+      if (!res.ok) { alert(data.error || "Failed to generate prompt."); return; }
+      setPrompt(data.finalPrompt || "");
     } catch (err) {
       console.error(err);
-      setPrompt(buildFallbackMotionPrompt());
-      alert("Prompt tool failed, so Zenavant built a fallback prompt instead.");
+      alert("Something went wrong.");
     } finally {
       setLoadingPrompt(false);
     }
   }
 
   async function handleSavePrompt() {
+    if (!prompt.trim()) { alert("No prompt to save."); return; }
+
+    setSavingPrompt(true);
     try {
-      if (!prompt.trim()) {
-        alert("No prompt to save.");
-        return;
-      }
-
-      setSavingPrompt(true);
-
-      const title = promptResult?.title || "Image to Video Prompt";
-
       const res = await fetch("/api/save-prompt", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title,
+          title: "Image to Video Prompt",
           idea,
           prompt,
           tool: "image-to-video",
-          metadata: {
-            styleHint,
-            intensity,
-            seconds,
-            size,
-            fit,
-            referenceCount: referenceImages.length,
-          },
+          metadata: { styleHint, intensity, seconds, size, model: modelId },
         }),
       });
 
       const data = await res.json();
-
-      if (!res.ok) {
-        alert(data.error || "Failed to save prompt.");
-        return;
-      }
-
+      if (!res.ok) { alert(data.error || "Failed to save prompt."); return; }
       alert("Prompt saved to Library.");
     } catch (err) {
       console.error(err);
@@ -239,43 +131,51 @@ The final result should feel like a clear, cinematic, hyper-realistic video shot
     }
   }
 
-  async function handleGenerateVideo() {
+  async function pollStatus(id: string) {
     try {
-      if (!imageFile) {
-        alert("Please upload an image first.");
-        return;
+      const res = await fetch(
+        `/api/image-to-video?id=${encodeURIComponent(id)}&prompt=${encodeURIComponent(prompt)}`,
+        { cache: "no-store" }
+      );
+
+      const data = await res.json();
+
+      if (data.status === "completed") {
+        setJobStatus("completed");
+        setVideoUrl(data.downloadUrl);
+        setLoading(false);
+        stopPolling();
+      } else if (data.status === "failed") {
+        setJobStatus("failed");
+        setError(data.error || "Generation failed");
+        setLoading(false);
+        stopPolling();
+      } else {
+        setJobStatus(data.status === "in_progress" ? "in_progress" : "queued");
       }
+    } catch (err) {
+      console.error(err);
+    }
+  }
 
-      if (!idea.trim() && !prompt.trim()) {
-        alert("Add an idea or prompt first.");
-        return;
-      }
+  async function handleGenerateVideo() {
+    if (!imageFile) { alert("Please upload an image first."); return; }
+    if (!prompt.trim()) { alert("Please add a prompt first."); return; }
 
-      let finalPrompt = prompt.trim();
+    stopPolling();
+    setLoading(true);
+    setError(null);
+    setVideoUrl(null);
+    setJobId(null);
+    setJobStatus(null);
 
-      if (
-        !finalPrompt ||
-        finalPrompt === "The subject remains consistent with the uploaded image."
-      ) {
-        finalPrompt = buildFallbackMotionPrompt();
-        setPrompt(finalPrompt);
-      }
-
-      setLoadingVideo(true);
-      setVideoUrl("");
-
+    try {
       const formData = new FormData();
       formData.append("image", imageFile);
-      formData.append("idea", idea);
-      formData.append("prompt", finalPrompt);
-      formData.append("intensity", intensity);
-      formData.append("size", size);
+      formData.append("prompt", prompt);
+      formData.append("modelId", modelId);
       formData.append("seconds", seconds);
-      formData.append("fit", fit);
-
-      referenceImages.forEach((file) => {
-        formData.append("referenceImages", file);
-      });
+      formData.append("size", size);
 
       const res = await fetch("/api/image-to-video", {
         method: "POST",
@@ -285,170 +185,203 @@ The final result should feel like a clear, cinematic, hyper-realistic video shot
       const data = await res.json();
 
       if (!res.ok) {
-        alert(data.error || "Failed to generate video.");
+        setError(data.error || "Failed to start video generation.");
+        setLoading(false);
         return;
       }
 
-      if (data?.prompt) {
-        setPrompt(data.prompt);
-      }
+      setJobId(data.id);
+      setJobStatus("queued");
 
-      setVideoUrl(data?.url || "");
-      alert("Video generated and saved to Library.");
-    } catch (err) {
-      console.error(err);
-      alert("Video generation failed.");
-    } finally {
-      setLoadingVideo(false);
+      pollTimer.current = window.setInterval(() => {
+        pollStatus(data.id);
+      }, 3000) as unknown as number;
+    } catch (err: any) {
+      setError(err?.message ?? "Something went wrong");
+      setLoading(false);
     }
   }
 
   if (checkingAuth) {
-    return (
-      <div className="max-w-3xl mx-auto p-4 text-black">
-        Loading...
-      </div>
-    );
+    return <div className="max-w-3xl mx-auto p-4 text-black">Loading...</div>;
   }
 
   return (
-    <div className="max-w-3xl mx-auto p-4 space-y-4 text-black">
+    <div className="max-w-3xl mx-auto p-6 space-y-4 text-black">
       <h1 className="text-2xl font-semibold">Image to Video</h1>
+      <p className="text-neutral-600">Upload an image and bring it to life.</p>
 
-      <input
-        type="file"
-        accept="image/*"
-        onChange={(e) => setImageFile(e.target.files?.[0] || null)}
-        className="w-full rounded-xl border border-neutral-300 bg-white p-3 text-black"
-      />
+      <div className="rounded-2xl border border-neutral-300 bg-white p-4 space-y-4">
 
-      <div className="space-y-2">
-        <label className="text-sm text-neutral-600">
-          Additional references (optional)
-        </label>
-
-        <input
-          type="file"
-          accept="image/*"
-          multiple
-          onChange={(e) => {
-            const files = Array.from(e.target.files || []);
-            setReferenceImages(files);
-          }}
-          className="w-full rounded-xl border border-neutral-300 bg-white p-3 text-black"
-        />
-
-        {referenceImages.length > 0 && (
-          <div className="text-xs text-neutral-500">
-            {referenceImages.length} reference image(s) selected
-          </div>
-        )}
-      </div>
-
-      {previewUrl && (
-        <div className="rounded-2xl border border-neutral-300 bg-white p-4">
-          <div className="mb-2 text-sm text-neutral-500">Preview</div>
-          <img
-            src={previewUrl}
-            alt="Preview"
-            className="w-full rounded-xl object-cover"
+        {/* Image Upload */}
+        <div>
+          <label className="block font-semibold mb-2">Upload Image</label>
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) => setImageFile(e.target.files?.[0] || null)}
+            className="w-full rounded-xl border border-neutral-300 bg-white p-3 text-black"
           />
         </div>
-      )}
 
-      <textarea
-        value={idea}
-        onChange={(e) => setIdea(e.target.value)}
-        placeholder="Describe the motion or reaction you want..."
-        className="w-full min-h-[120px] rounded-2xl border border-neutral-300 bg-white p-4 text-black placeholder:text-neutral-500"
-      />
+        {/* Preview */}
+        {previewUrl && (
+          <div className="rounded-xl border border-neutral-200 overflow-hidden">
+            <img
+              src={previewUrl}
+              alt="Preview"
+              className="w-full object-cover max-h-64"
+            />
+          </div>
+        )}
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-        <input
-          value={styleHint}
-          onChange={(e) => setStyleHint(e.target.value)}
-          placeholder="Style hint (e.g., hyper-realistic, cinematic, moody, natural light)"
-          className="rounded-xl border border-neutral-300 bg-white p-3 text-black placeholder:text-neutral-500"
-        />
+        {/* Idea */}
+        <div>
+          <label className="block font-semibold mb-2">Describe the motion</label>
+          <textarea
+            value={idea}
+            onChange={(e) => setIdea(e.target.value)}
+            placeholder="Describe what you want the image to do..."
+            className="w-full min-h-[100px] rounded-2xl border border-neutral-300 bg-white p-4 text-black placeholder:text-neutral-500"
+          />
+        </div>
 
-        <select
-          value={intensity}
-          onChange={(e) =>
-            setIntensity(e.target.value as "subtle" | "balanced" | "dramatic")
-          }
-          className="rounded-xl border border-neutral-300 bg-white p-3 text-black"
+        {/* Style & Intensity */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <input
+            value={styleHint}
+            onChange={(e) => setStyleHint(e.target.value)}
+            placeholder="Style hint (e.g., cinematic, realistic)"
+            className="rounded-xl border border-neutral-300 bg-white p-3 text-black placeholder:text-neutral-500"
+          />
+          <select
+            value={intensity}
+            onChange={(e) => setIntensity(e.target.value as "subtle" | "balanced" | "dramatic")}
+            className="rounded-xl border border-neutral-300 bg-white p-3 text-black"
+          >
+            <option value="subtle">Subtle</option>
+            <option value="balanced">Balanced</option>
+            <option value="dramatic">Dramatic</option>
+          </select>
+        </div>
+
+        {/* Generate Prompt Button */}
+        <button
+          onClick={handleGeneratePrompt}
+          disabled={loadingPrompt}
+          className="w-full rounded-2xl bg-neutral-800 px-4 py-3 text-white disabled:opacity-50"
         >
-          <option value="subtle">Subtle</option>
-          <option value="balanced">Balanced</option>
-          <option value="dramatic">Dramatic</option>
-        </select>
+          {loadingPrompt ? "Generating Prompt..." : "Generate Motion Prompt"}
+        </button>
 
-        <select
-          value={seconds}
-          onChange={(e) => setSeconds(e.target.value as "4" | "8" | "12")}
-          className="rounded-xl border border-neutral-300 bg-white p-3 text-black"
-        >
-          <option value="4">4 seconds</option>
-          <option value="8">8 seconds</option>
-          <option value="12">12 seconds</option>
-        </select>
+        {/* Prompt */}
+        <div>
+          <label className="block font-semibold mb-2">Motion Prompt</label>
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="Your motion prompt will appear here, or type one directly..."
+            rows={5}
+            className="w-full rounded-2xl border border-neutral-300 bg-white p-4 text-black placeholder:text-neutral-500"
+          />
+        </div>
 
-        <select
-          value={size}
-          onChange={(e) => setSize(e.target.value)}
-          className="rounded-xl border border-neutral-300 bg-white p-3 text-black"
-        >
-          <option value="1280x720">1280x720</option>
-          <option value="720x1280">720x1280</option>
-        </select>
+        {/* Model */}
+        <div>
+          <label className="block font-semibold mb-2">Model</label>
+          <select
+            value={modelId}
+            onChange={(e) => setModelId(e.target.value)}
+            className="w-full rounded-xl border border-neutral-300 bg-white p-3 text-black"
+          >
+            {I2V_MODELS.map((m) => (
+              <option key={m.value} value={m.value}>{m.label}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Size & Duration */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-sm font-medium text-neutral-700 mb-1">Size</label>
+            <select
+              value={size}
+              onChange={(e) => setSize(e.target.value)}
+              className="w-full rounded-xl border border-neutral-300 bg-white p-3 text-black"
+            >
+              <option value="1280x720">1280x720 (Landscape)</option>
+              <option value="720x1280">720x1280 (Portrait)</option>
+              <option value="1024x1024">1024x1024 (Square)</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-neutral-700 mb-1">Duration</label>
+            <select
+              value={seconds}
+              onChange={(e) => setSeconds(e.target.value)}
+              className="w-full rounded-xl border border-neutral-300 bg-white p-3 text-black"
+            >
+              <option value="4">4 seconds</option>
+              <option value="5">5 seconds</option>
+              <option value="8">8 seconds</option>
+              <option value="10">10 seconds</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <button
+            onClick={handleSavePrompt}
+            disabled={savingPrompt || !prompt.trim()}
+            className="rounded-2xl bg-neutral-800 px-4 py-3 text-white disabled:opacity-50"
+          >
+            {savingPrompt ? "Saving..." : "Save Prompt to Library"}
+          </button>
+
+          <button
+            onClick={handleGenerateVideo}
+            disabled={loading || !prompt.trim() || !imageFile}
+            className="rounded-2xl bg-black px-4 py-3 text-white disabled:opacity-50"
+          >
+            {loading ? "Generating Video..." : "Generate Video"}
+          </button>
+        </div>
+
+        {/* Status */}
+        {jobStatus && jobStatus !== "completed" && (
+          <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700">
+            <b>Status:</b> {jobStatus}
+          </div>
+        )}
+
+        {/* Error */}
+        {error && (
+          <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-red-700">
+            {error}
+          </div>
+        )}
+
+        <p className="text-sm text-neutral-500">
+          Keep this page open while generating.
+        </p>
       </div>
 
-      <select
-        value={fit}
-        onChange={(e) => setFit(e.target.value)}
-        className="w-full rounded-xl border border-neutral-300 bg-white p-3 text-black"
-      >
-        <option value="preserve">Preserve</option>
-        <option value="fill">Fill</option>
-      </select>
-
-      <button
-        onClick={handleGeneratePrompt}
-        disabled={loadingPrompt}
-        className="w-full rounded-2xl bg-neutral-800 px-4 py-3 text-white disabled:opacity-50"
-      >
-        {loadingPrompt ? "Generating Motion Prompt..." : "Generate Motion Prompt"}
-      </button>
-
-      <textarea
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        placeholder="Your generated motion prompt will appear here..."
-        className="w-full min-h-[220px] rounded-2xl border border-neutral-300 bg-white p-4 text-black placeholder:text-neutral-500"
-      />
-
-      <button
-        onClick={handleSavePrompt}
-        disabled={savingPrompt}
-        className="w-full rounded-2xl bg-neutral-800 px-4 py-3 text-white disabled:opacity-50"
-      >
-        {savingPrompt ? "Saving..." : "Save Prompt to Library"}
-      </button>
-
-      <button
-        onClick={handleGenerateVideo}
-        disabled={loadingVideo}
-        className="w-full rounded-2xl bg-black px-4 py-3 text-white disabled:opacity-50"
-      >
-        {loadingVideo ? "Generating Video..." : "Generate Video"}
-      </button>
-
+      {/* Result */}
       {videoUrl && (
-        <div className="rounded-2xl border border-neutral-300 bg-white p-4">
-          <video src={videoUrl} controls className="w-full rounded-xl" />
-        </div>
+        <section className="rounded-2xl border border-neutral-300 bg-white p-4">
+          <h2 className="text-lg font-semibold mb-4">Result</h2>
+          <video controls src={videoUrl} className="w-full rounded-xl" />
+          
+            href={videoUrl}
+            download
+            className="mt-2 inline-block text-sm text-black underline"
+          <a>
+            Download video
+          </a>
+        </section>
       )}
     </div>
   );
 }
-

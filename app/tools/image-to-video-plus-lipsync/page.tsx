@@ -1,27 +1,72 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
 
-type SoraStatus = "queued" | "in_progress" | "completed" | "failed";
-type LipStatus = "starting" | "processing" | "succeeded" | "failed" | "completed";
+type JobStatus = "queued" | "in_progress" | "completed" | "failed";
+type LipStatus = "starting" | "processing" | "completed" | "failed";
+type LipMode = "audio" | "text";
 
-export default function ImageToVideoPlusLipSyncPage() {
-  // --- Step 1: Image -> Video (Sora) ---
-  const [file, setFile] = useState<File | null>(null);
+const I2V_MODELS = [
+  { value: "bytedance/seedance-1-pro", label: "Seedance 1 Pro" },
+  { value: "bytedance/seedance-2.0", label: "Seedance 2.0" },
+  { value: "kwaivgi/kling-v2.5-turbo-pro", label: "Kling v2.5 Turbo" },
+  { value: "kwaivgi/kling-v3-omni-video", label: "Kling v3 Omni" },
+  { value: "minimax/video-01", label: "Minimax Video-01" },
+  { value: "minimax/hailuo-02", label: "Hailuo 2" },
+  { value: "wan-video/wan-2.5-i2v", label: "Wan 2.5 Image-to-Video" },
+  { value: "lightricks/ltx-video", label: "LTX Video" },
+];
+
+export default function LipSyncPage() {
+  const router = useRouter();
+
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
+  // Step 1 — Image to Video
+  const [imageFile, setImageFile] = useState<File | null>(null);
   const [prompt, setPrompt] = useState("");
-  const [seconds, setSeconds] = useState("8");
+  const [modelId, setModelId] = useState("bytedance/seedance-1-pro");
+  const [seconds, setSeconds] = useState("5");
   const [size, setSize] = useState("1280x720");
-  const [model, setModel] = useState<"sora-2" | "sora-2-pro">("sora-2");
 
   const [loading, setLoading] = useState(false);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [status, setStatus] = useState<SoraStatus | null>(null);
-  const [progress, setProgress] = useState<number>(0);
+  const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
-
   const [error, setError] = useState<string | null>(null);
 
   const pollTimer = useRef<number | null>(null);
+
+  // Step 2 — Lip Sync
+  const [lipMode, setLipMode] = useState<LipMode>("audio");
+  const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [lipText, setLipText] = useState("");
+  const [lipLoading, setLipLoading] = useState(false);
+  const [lipStatus, setLipStatus] = useState<LipStatus | null>(null);
+  const [lipVideoUrl, setLipVideoUrl] = useState<string | null>(null);
+
+  const lipTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    async function checkSession() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!mounted) return;
+      if (!session) { router.replace("/"); return; }
+      setCheckingAuth(false);
+    }
+    checkSession();
+    return () => { mounted = false; };
+  }, [router]);
+
+  useEffect(() => {
+    return () => {
+      stopPolling();
+      stopLipPolling();
+    };
+  }, []);
+
   function stopPolling() {
     if (pollTimer.current) {
       window.clearInterval(pollTimer.current);
@@ -29,90 +74,6 @@ export default function ImageToVideoPlusLipSyncPage() {
     }
   }
 
-  async function pollSora(id: string) {
-    try {
-      const res = await fetch(`/api/image-to-video?id=${encodeURIComponent(id)}`);
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data?.error || "Status check failed");
-        stopPolling();
-        setLoading(false);
-        return;
-      }
-
-      setStatus(data.status);
-      setProgress(typeof data.progress === "number" ? data.progress : 0);
-
-      if (data.status === "completed") {
-        setVideoUrl(data.downloadUrl);
-        stopPolling();
-        setLoading(false);
-      }
-
-      if (data.status === "failed") {
-        setError(data.error || "Video failed");
-        stopPolling();
-        setLoading(false);
-      }
-    } catch (e: any) {
-      setError(e?.message ?? "Polling failed");
-      stopPolling();
-      setLoading(false);
-    }
-  }
-
-  async function generateSora() {
-    setError(null);
-    setVideoUrl(null);
-    setJobId(null);
-    setStatus(null);
-    setProgress(0);
-
-    if (!file) return setError("Choose an image first.");
-    if (prompt.trim().length < 3) return setError("Write a prompt (3+ characters).");
-
-    stopPolling();
-    setLoading(true);
-
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("prompt", prompt);
-      fd.append("seconds", seconds);
-      fd.append("size", size);
-      fd.append("model", model);
-
-      const res = await fetch("/api/image-to-video", { method: "POST", body: fd });
-      const data = await res.json();
-
-      if (!res.ok) {
-        setLoading(false);
-        setError(data?.error || "Create failed");
-        return;
-      }
-
-      setJobId(data.id);
-      setStatus(data.status);
-      setProgress(typeof data.progress === "number" ? data.progress : 0);
-
-      pollTimer.current = window.setInterval(() => pollSora(data.id), 2000) as unknown as number;
-    } catch (e: any) {
-      setError(e?.message ?? "Something went wrong");
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => () => stopPolling(), []);
-
-  // --- Step 2: Lip Sync ---
-  const [audio, setAudio] = useState<File | null>(null);
-  const [lipLoading, setLipLoading] = useState(false);
-  const [lipId, setLipId] = useState<string | null>(null);
-  const [lipStatus, setLipStatus] = useState<LipStatus | null>(null);
-  const [lipVideoUrl, setLipVideoUrl] = useState<string | null>(null);
-
-  const lipTimer = useRef<number | null>(null);
   function stopLipPolling() {
     if (lipTimer.current) {
       window.clearInterval(lipTimer.current);
@@ -120,317 +81,340 @@ export default function ImageToVideoPlusLipSyncPage() {
     }
   }
 
-  async function pollLip(id: string) {
+  async function pollVideo(id: string) {
     try {
-      const res = await fetch(`/api/lipsync?id=${encodeURIComponent(id)}`);
+      const res = await fetch(
+        `/api/image-to-video?id=${encodeURIComponent(id)}&prompt=${encodeURIComponent(prompt)}`,
+        { cache: "no-store" }
+      );
+      const data = await res.json();
+
+      if (data.status === "completed") {
+        setJobStatus("completed");
+        setVideoUrl(data.downloadUrl);
+        setLoading(false);
+        stopPolling();
+      } else if (data.status === "failed") {
+        setJobStatus("failed");
+        setError(data.error || "Video generation failed");
+        setLoading(false);
+        stopPolling();
+      } else {
+        setJobStatus(data.status === "in_progress" ? "in_progress" : "queued");
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function generateVideo() {
+    if (!imageFile) { alert("Please upload an image first."); return; }
+    if (!prompt.trim()) { alert("Please add a prompt first."); return; }
+
+    stopPolling();
+    setLoading(true);
+    setError(null);
+    setVideoUrl(null);
+    setJobStatus(null);
+    setLipVideoUrl(null);
+    setLipStatus(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("image", imageFile);
+      formData.append("prompt", prompt);
+      formData.append("modelId", modelId);
+      formData.append("seconds", seconds);
+      formData.append("size", size);
+
+      const res = await fetch("/api/image-to-video", {
+        method: "POST",
+        body: formData,
+      });
+
       const data = await res.json();
 
       if (!res.ok) {
-        setLipLoading(false);
-        setError(data?.error || "Lip status failed");
-        stopLipPolling();
+        setError(data.error || "Failed to start video generation.");
+        setLoading(false);
         return;
       }
+
+      setJobStatus("queued");
+      pollTimer.current = window.setInterval(() => {
+        pollVideo(data.id);
+      }, 3000) as unknown as number;
+    } catch (e: any) {
+      setError(e?.message ?? "Something went wrong");
+      setLoading(false);
+    }
+  }
+
+  async function pollLipSync(id: string) {
+    try {
+      const res = await fetch(
+        `/api/lipsync?id=${encodeURIComponent(id)}`,
+        { cache: "no-store" }
+      );
+      const data = await res.json();
 
       if (data.status === "completed") {
         setLipStatus("completed");
         setLipVideoUrl(data.downloadUrl);
         setLipLoading(false);
         stopLipPolling();
-        return;
-      }
-
-      if (data.status === "failed") {
+      } else if (data.status === "failed") {
         setLipStatus("failed");
         setError(data.error || "Lip sync failed");
         setLipLoading(false);
         stopLipPolling();
-        return;
+      } else {
+        setLipStatus(
+          data.status === "processing" ? "processing" : "starting"
+        );
       }
-
-      setLipStatus(data.status);
-    } catch (e: any) {
-      setLipLoading(false);
-      setError(e?.message ?? "Lip polling failed");
-      stopLipPolling();
+    } catch (err) {
+      console.error(err);
     }
   }
 
   async function runLipSync() {
-    setError(null);
-    setLipVideoUrl(null);
-    setLipId(null);
-    setLipStatus(null);
-
-    if (!videoUrl) return setError("Generate the video first (Step 1).");
-    if (!audio) return setError("Upload a WAV audio file first.");
+    if (!videoUrl) { alert("Generate a video first in Step 1."); return; }
+    if (lipMode === "audio" && !audioFile) { alert("Please upload an audio file."); return; }
+    if (lipMode === "text" && !lipText.trim()) { alert("Please enter text for lip sync."); return; }
 
     stopLipPolling();
     setLipLoading(true);
+    setLipStatus(null);
+    setLipVideoUrl(null);
+    setError(null);
 
     try {
       const fd = new FormData();
       fd.append("videoUrl", videoUrl);
-      fd.append("audio", audio);
+      fd.append("mode", lipMode);
+      if (lipMode === "audio" && audioFile) fd.append("audio", audioFile);
+      if (lipMode === "text") fd.append("text", lipText);
 
-      const res = await fetch("/api/lipsync", { method: "POST", body: fd });
+      const res = await fetch("/api/lipsync", {
+        method: "POST",
+        body: fd,
+      });
+
       const data = await res.json();
 
       if (!res.ok) {
+        setError(data.error || "Lip sync failed");
         setLipLoading(false);
-        setError(data?.error || "Lip sync create failed");
         return;
       }
 
-      setLipId(data.id);
-      setLipStatus(data.status);
-
-      lipTimer.current = window.setInterval(() => pollLip(data.id), 2000) as unknown as number;
+      setLipStatus("starting");
+      lipTimer.current = window.setInterval(() => {
+        pollLipSync(data.id);
+      }, 3000) as unknown as number;
     } catch (e: any) {
-      setLipLoading(false);
       setError(e?.message ?? "Something went wrong");
+      setLipLoading(false);
     }
   }
 
-  useEffect(() => () => stopLipPolling(), []);
-
-  const canGenerateVideo = !!file && prompt.trim().length >= 3 && !loading;
-  const canLipSync = !!videoUrl && !!audio && !lipLoading;
+  if (checkingAuth) {
+    return <div className="max-w-3xl mx-auto p-4 text-black">Loading...</div>;
+  }
 
   return (
-    <main style={{ maxWidth: 760, margin: "0 auto", padding: 24 }}>
-      <h1 style={{ fontSize: 34, fontWeight: 750, marginBottom: 6 }}>
-        Image → Video + Audio Lip Sync
-      </h1>
-      <p style={{ opacity: 0.8, marginTop: 0 }}>
-        Step 1: animate the image with Sora. Step 2: upload audio and lip-sync.
-      </p>
+    <main className="max-w-3xl mx-auto p-6 space-y-6 text-black">
+      <div>
+        <h1 className="text-2xl md:text-3xl font-semibold">Lip Sync</h1>
+        <p className="text-neutral-600 mt-1">
+          Step 1: Generate a video from an image. Step 2: Add lip sync with audio or text.
+        </p>
+      </div>
 
       {/* Step 1 */}
-      <div
-        style={{
-          marginTop: 16,
-          padding: 16,
-          border: "1px solid rgba(0,0,0,0.12)",
-          borderRadius: 12,
-          background: "rgba(255,255,255,0.9)",
-        }}
-      >
-        <h2 style={{ fontSize: 18, fontWeight: 750, marginTop: 0 }}>Step 1 — Generate video</h2>
+      <div className="rounded-2xl border border-neutral-300 bg-white p-4 space-y-4">
+        <h2 className="text-lg font-semibold">Step 1 — Generate Video</h2>
 
-        <div style={{ marginTop: 8 }}>
-          <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        <div>
+          <label className="block font-semibold mb-2">Upload Image</label>
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) => setImageFile(e.target.files?.[0] || null)}
+            className="w-full rounded-xl border border-neutral-300 bg-white p-3 text-black"
+          />
         </div>
 
-        <label style={{ display: "block", fontWeight: 650, marginTop: 12, marginBottom: 8 }}>
-          Prompt
-        </label>
-        <textarea
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Example: Talking head, natural speaking motion, subtle camera push-in."
-          rows={4}
-          style={{
-            width: "100%",
-            padding: 12,
-            fontSize: 16,
-            borderRadius: 10,
-            border: "1px solid rgba(0,0,0,0.18)",
-            outline: "none",
-            background: "#fff",
-            color: "#111",
-          }}
-        />
-
-        <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <label style={{ fontSize: 14, opacity: 0.85 }}>Model</label>
-          <select
-            value={model}
-            onChange={(e) => setModel(e.target.value as any)}
-            style={{
-              padding: "8px 10px",
-              borderRadius: 10,
-              border: "1px solid rgba(0,0,0,0.2)",
-              background: "#fff",
-            }}
-          >
-            <option value="sora-2">sora-2</option>
-            <option value="sora-2-pro">sora-2-pro</option>
-          </select>
-
-          <label style={{ fontSize: 14, opacity: 0.85 }}>Size</label>
-          <select
-            value={size}
-            onChange={(e) => setSize(e.target.value)}
-            style={{
-              padding: "8px 10px",
-              borderRadius: 10,
-              border: "1px solid rgba(0,0,0,0.2)",
-              background: "#fff",
-            }}
-          >
-            <option value="1280x720">1280×720</option>
-            <option value="720x1280">720×1280</option>
-            <option value="1792x1024">1792×1024</option>
-            <option value="1024x1792">1024×1792</option>
-          </select>
-
-          <label style={{ fontSize: 14, opacity: 0.85 }}>Seconds</label>
-          <select
-            value={seconds}
-            onChange={(e) => setSeconds(e.target.value)}
-            style={{
-              padding: "8px 10px",
-              borderRadius: 10,
-              border: "1px solid rgba(0,0,0,0.2)",
-              background: "#fff",
-            }}
-          >
-            <option value="4">4</option>
-            <option value="8">8</option>
-            <option value="12">12</option>
-          </select>
-
-          <button
-            onClick={generateSora}
-            disabled={!canGenerateVideo}
-            style={{
-              marginLeft: "auto",
-              padding: "10px 14px",
-              fontSize: 16,
-              borderRadius: 10,
-              border: "1px solid rgba(0,0,0,0.2)",
-              background: !canGenerateVideo ? "rgba(0,0,0,0.08)" : "#111",
-              color: !canGenerateVideo ? "#444" : "#fff",
-              cursor: !canGenerateVideo ? "not-allowed" : "pointer",
-            }}
-          >
-            {loading ? "Generating..." : "Generate video"}
-          </button>
+        <div>
+          <label className="block font-semibold mb-2">Prompt</label>
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="Talking head, natural speaking motion, subtle camera push-in..."
+            rows={4}
+            className="w-full rounded-2xl border border-neutral-300 bg-white p-4 text-black placeholder:text-neutral-500"
+          />
         </div>
 
-        {(jobId || status) && (
-          <div style={{ marginTop: 12, fontSize: 14, opacity: 0.85 }}>
-            <div><b>Job ID:</b> {jobId ?? "—"}</div>
-            <div><b>Status:</b> {status ?? "—"}</div>
-            <div><b>Progress:</b> {progress}%</div>
+        <div>
+          <label className="block font-semibold mb-2">Model</label>
+          <select
+            value={modelId}
+            onChange={(e) => setModelId(e.target.value)}
+            className="w-full rounded-xl border border-neutral-300 bg-white p-3 text-black"
+          >
+            {I2V_MODELS.map((m) => (
+              <option key={m.value} value={m.value}>{m.label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-sm font-medium text-neutral-700 mb-1">Size</label>
+            <select
+              value={size}
+              onChange={(e) => setSize(e.target.value)}
+              className="w-full rounded-xl border border-neutral-300 bg-white p-3 text-black"
+            >
+              <option value="1280x720">1280x720 (Landscape)</option>
+              <option value="720x1280">720x1280 (Portrait)</option>
+              <option value="1024x1024">1024x1024 (Square)</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-neutral-700 mb-1">Duration</label>
+            <select
+              value={seconds}
+              onChange={(e) => setSeconds(e.target.value)}
+              className="w-full rounded-xl border border-neutral-300 bg-white p-3 text-black"
+            >
+              <option value="4">4 seconds</option>
+              <option value="5">5 seconds</option>
+              <option value="8">8 seconds</option>
+              <option value="10">10 seconds</option>
+            </select>
+          </div>
+        </div>
+
+        <button
+          onClick={generateVideo}
+          disabled={loading || !imageFile || !prompt.trim()}
+          className="w-full rounded-2xl bg-black px-4 py-3 text-white disabled:opacity-50"
+        >
+          {loading ? "Generating Video..." : "Generate Video"}
+        </button>
+
+        {jobStatus && jobStatus !== "completed" && (
+          <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700">
+            <b>Status:</b> {jobStatus}
+          </div>
+        )}
+
+        {videoUrl && (
+          <div>
+            <p className="text-sm font-medium text-neutral-700 mb-2">
+              Video ready! Proceed to Step 2.
+            </p>
+            <video
+              controls
+              src={videoUrl}
+              className="w-full rounded-xl"
+            />
           </div>
         )}
       </div>
 
-      {videoUrl && (
-        <section
-          style={{
-            marginTop: 18,
-            padding: 16,
-            border: "1px solid rgba(0,0,0,0.12)",
-            borderRadius: 12,
-            background: "rgba(255,255,255,0.9)",
-          }}
-        >
-          <h2 style={{ fontSize: 18, fontWeight: 750, marginTop: 0 }}>Sora Result</h2>
-          <video
-            controls
-            src={videoUrl}
-            style={{
-              marginTop: 10,
-              width: "100%",
-              height: "auto",
-              borderRadius: 12,
-              border: "1px solid rgba(0,0,0,0.12)",
-            }}
-          />
-        </section>
-      )}
-
       {/* Step 2 */}
-      <div
-        style={{
-          marginTop: 18,
-          padding: 16,
-          border: "1px solid rgba(0,0,0,0.12)",
-          borderRadius: 12,
-          background: "rgba(255,255,255,0.9)",
-        }}
-      >
-        <h2 style={{ fontSize: 18, fontWeight: 750, marginTop: 0 }}>Step 2 — Upload audio + lip-sync</h2>
-        <p style={{ marginTop: 6, opacity: 0.8 }}>
-          Lipsync 2 expects a <b>WAV</b> audio input. (We can upgrade later for MP3/M4A.)
-        </p>
+      <div className={`rounded-2xl border p-4 space-y-4 ${
+        videoUrl
+          ? "border-neutral-300 bg-white"
+          : "border-neutral-200 bg-neutral-50 opacity-60 pointer-events-none"
+      }`}>
+        <h2 className="text-lg font-semibold">Step 2 — Lip Sync</h2>
 
-        <div style={{ marginTop: 8 }}>
-          <input type="file" accept="audio/wav" onChange={(e) => setAudio(e.target.files?.[0] ?? null)} />
-        </div>
+        {!videoUrl && (
+          <p className="text-sm text-neutral-500">
+            Complete Step 1 first to enable lip sync.
+          </p>
+        )}
 
-        <div style={{ display: "flex", gap: 10, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <button
-            onClick={runLipSync}
-            disabled={!canLipSync}
-            style={{
-              padding: "10px 14px",
-              fontSize: 16,
-              borderRadius: 10,
-              border: "1px solid rgba(0,0,0,0.2)",
-              background: !canLipSync ? "rgba(0,0,0,0.08)" : "#111",
-              color: !canLipSync ? "#444" : "#fff",
-              cursor: !canLipSync ? "not-allowed" : "pointer",
-            }}
+        <div>
+          <label className="block font-semibold mb-2">Lip Sync Mode</label>
+          <select
+            value={lipMode}
+            onChange={(e) => setLipMode(e.target.value as LipMode)}
+            className="w-full rounded-xl border border-neutral-300 bg-white p-3 text-black"
           >
-            {lipLoading ? "Lip-syncing..." : "Run lip sync"}
-          </button>
-
-          {(lipId || lipStatus) && (
-            <div style={{ fontSize: 14, opacity: 0.85 }}>
-              <div><b>Lip Job:</b> {lipId ?? "—"}</div>
-              <div><b>Status:</b> {lipStatus ?? "—"}</div>
-            </div>
-          )}
+            <option value="audio">Audio File</option>
+            <option value="text">Text to Speech</option>
+          </select>
         </div>
-      </div>
 
-      {error && (
-        <div
-          style={{
-            marginTop: 12,
-            padding: 12,
-            borderRadius: 10,
-            border: "1px solid rgba(220, 38, 38, 0.35)",
-            background: "rgba(220, 38, 38, 0.06)",
-            color: "#7f1d1d",
-          }}
-        >
-          {error}
-        </div>
-      )}
+        {lipMode === "audio" && (
+          <div>
+            <label className="block font-semibold mb-2">Upload Audio</label>
+            <input
+              type="file"
+              accept="audio/*"
+              onChange={(e) => setAudioFile(e.target.files?.[0] || null)}
+              className="w-full rounded-xl border border-neutral-300 bg-white p-3 text-black"
+            />
+            {audioFile && (
+              <p className="mt-1 text-sm text-neutral-500">{audioFile.name}</p>
+            )}
+          </div>
+        )}
 
-      {lipVideoUrl && (
-        <section
-          style={{
-            marginTop: 18,
-            padding: 16,
-            border: "1px solid rgba(0,0,0,0.12)",
-            borderRadius: 12,
-            background: "rgba(255,255,255,0.9)",
-          }}
+        {lipMode === "text" && (
+          <div>
+            <label className="block font-semibold mb-2">Text to Speak</label>
+            <textarea
+              value={lipText}
+              onChange={(e) => setLipText(e.target.value)}
+              placeholder="Enter the text you want the person to say..."
+              rows={4}
+              className="w-full rounded-2xl border border-neutral-300 bg-white p-4 text-black placeholder:text-neutral-500"
+            />
+          </div>
+        )}
+
+        <button
+          onClick={runLipSync}
+          disabled={lipLoading || !videoUrl}
+          className="w-full rounded-2xl bg-black px-4 py-3 text-white disabled:opacity-50"
         >
-          <h2 style={{ fontSize: 18, fontWeight: 750, marginTop: 0 }}>Lip-synced Result</h2>
-          <video
-            controls
-            src={lipVideoUrl}
-            style={{
-              marginTop: 10,
-              width: "100%",
-              height: "auto",
-              borderRadius: 12,
-              border: "1px solid rgba(0,0,0,0.12)",
-            }}
-          />
-          <div style={{ marginTop: 10 }}>
-            <a href={lipVideoUrl} download style={{ fontSize: 14 }}>
+          {lipLoading ? "Running Lip Sync..." : "Run Lip Sync"}
+        </button>
+
+        {lipStatus && lipStatus !== "completed" && (
+          <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700">
+            <b>Status:</b> {lipStatus}
+          </div>
+        )}
+
+        {lipVideoUrl && (
+          <div>
+            <p className="text-sm font-medium text-neutral-700 mb-2">
+              Lip sync complete!
+            </p>
+            <video controls src={lipVideoUrl} className="w-full rounded-xl" />
+            
+              href={lipVideoUrl}
+              download
+              className="mt-2 inline-block text-sm text-black underline"
+            <a>
               Download lip-synced video
             </a>
           </div>
-        </section>
+        )}
+      </div>
+
+      {error && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-red-700">
+          {error}
+        </div>
       )}
     </main>
   );

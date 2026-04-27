@@ -1,11 +1,11 @@
-import OpenAI from "openai";
+import Replicate from "replicate";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+const replicate = new Replicate({
+  auth: process.env.REPLICATE_API_TOKEN,
 });
 
 function jsonError(message: string, status = 400, details?: string) {
@@ -15,54 +15,125 @@ function jsonError(message: string, status = 400, details?: string) {
   );
 }
 
-function toBytes(buf: ArrayBuffer) {
-  return new Uint8Array(buf);
-}
+// Model configurations
+const VIDEO_MODELS: Record<string, { label: string; inputBuilder: (prompt: string, seconds: number, size: string) => object }> = {
+  "kwaivgi/kling-v3-video": {
+    label: "Kling v3",
+    inputBuilder: (prompt, seconds) => ({
+      prompt,
+      duration: seconds <= 5 ? 5 : 10,
+      aspect_ratio: "16:9",
+    }),
+  },
+  "kwaivgi/kling-v2.5-turbo-pro": {
+    label: "Kling v2.5 Turbo",
+    inputBuilder: (prompt, seconds) => ({
+      prompt,
+      duration: seconds <= 5 ? 5 : 10,
+      aspect_ratio: "16:9",
+    }),
+  },
+  "minimax/video-01": {
+    label: "Minimax Video-01",
+    inputBuilder: (prompt) => ({
+      prompt,
+    }),
+  },
+  "minimax/hailuo-02": {
+    label: "Hailuo 2",
+    inputBuilder: (prompt) => ({
+      prompt,
+    }),
+  },
+  "wan-video/wan-2.5-t2v": {
+    label: "Wan 2.5",
+    inputBuilder: (prompt) => ({
+      prompt,
+    }),
+  },
+  "wan-video/wan-2.2-t2v-fast": {
+    label: "Wan 2.2 Fast",
+    inputBuilder: (prompt) => ({
+      prompt,
+    }),
+  },
+  "lightricks/ltx-video": {
+    label: "LTX Video",
+    inputBuilder: (prompt, seconds, size) => ({
+      prompt,
+      num_frames: seconds * 8,
+      width: parseInt(size.split("x")[0]) || 768,
+      height: parseInt(size.split("x")[1]) || 512,
+    }),
+  },
+  "google/veo-2": {
+    label: "Veo 2",
+    inputBuilder: (prompt, seconds) => ({
+      prompt,
+      duration: Math.min(seconds, 8),
+      aspect_ratio: "16:9",
+    }),
+  },
+  "google/veo-3.1-lite": {
+    label: "Veo 3.1 Lite",
+    inputBuilder: (prompt, seconds) => ({
+      prompt,
+      duration: Math.min(seconds, 8),
+      aspect_ratio: "16:9",
+    }),
+  },
+  "tencent/hunyuan-video": {
+    label: "Hunyuan Video",
+    inputBuilder: (prompt) => ({
+      prompt,
+    }),
+  },
+  "bytedance/seedance-2.0": {
+    label: "Seedance 2.0",
+    inputBuilder: (prompt, seconds) => ({
+      prompt,
+      duration: seconds,
+    }),
+  },
+  "bytedance/seedance-1-pro": {
+    label: "Seedance 1 Pro",
+    inputBuilder: (prompt, seconds) => ({
+      prompt,
+      duration: seconds,
+    }),
+  },
+};
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
 
     const prompt = (body?.prompt ?? "").toString().trim();
-    const size = (body?.size ?? "1280x720").toString() as
-      | "1280x720"
-      | "720x1280"
-      | "1792x1024"
-      | "1024x1792";
-    const seconds = (body?.seconds ?? "4").toString() as "4" | "8" | "12";
-    const numOutputs = Math.min(
-      3,
-      Math.max(1, Number(body?.numOutputs ?? 1))
-    );
+    const size = (body?.size ?? "1280x720").toString();
+    const seconds = Number(body?.seconds ?? 5);
+    const numOutputs = Math.min(3, Math.max(1, Number(body?.numOutputs ?? 1)));
+    const modelId = (body?.modelId ?? "bytedance/seedance-1-pro").toString();
 
-    if (!process.env.OPENAI_API_KEY) {
-      return jsonError("Missing OPENAI_API_KEY", 500);
+    if (!process.env.REPLICATE_API_TOKEN) {
+      return jsonError("Missing REPLICATE_API_TOKEN", 500);
     }
 
     if (prompt.length < 5) {
       return jsonError("Missing or too-short prompt", 400);
     }
 
-    if (!["4", "8", "12"].includes(seconds)) {
-      return jsonError("Seconds must be 4, 8, or 12", 400);
+    const modelConfig = VIDEO_MODELS[modelId];
+    if (!modelConfig) {
+      return jsonError(`Unknown model: ${modelId}`, 400);
     }
 
-    if (
-      !["1280x720", "720x1280", "1792x1024", "1024x1792"].includes(size)
-    ) {
-      return jsonError(
-        "Size must be 1280x720, 720x1280, 1792x1024, or 1024x1792",
-        400
-      );
-    }
+    const input = modelConfig.inputBuilder(prompt, seconds, size);
 
     const jobs = await Promise.all(
       Array.from({ length: numOutputs }).map(() =>
-        client.videos.create({
-          model: "sora-2",
-          prompt,
-          size,
-          seconds,
+        replicate.predictions.create({
+          model: modelId,
+          input,
         })
       )
     );
@@ -71,25 +142,13 @@ export async function POST(req: Request) {
     const first = jobs[0];
 
     if (ids.length === 1) {
-      return Response.json({
-        id: first.id,
-        status: first.status,
-        progress: first.progress ?? 0,
-      });
+      return Response.json({ id: first.id, status: first.status, progress: 0 });
     }
 
-    return Response.json({
-      ids,
-      status: first.status,
-      progress: first.progress ?? 0,
-    });
+    return Response.json({ ids, status: first.status, progress: 0 });
   } catch (error: any) {
     console.error("VIDEO POST ERROR:", error);
-    return jsonError(
-      "Video job creation failed",
-      500,
-      error?.message ?? String(error)
-    );
+    return jsonError("Video job creation failed", 500, error?.message ?? String(error));
   }
 }
 
@@ -98,125 +157,68 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const id = url.searchParams.get("id");
 
-    if (!id) {
-      return jsonError("Missing id", 400);
+    if (!id) return jsonError("Missing id", 400);
+
+    if (!process.env.REPLICATE_API_TOKEN) {
+      return jsonError("Missing REPLICATE_API_TOKEN", 500);
     }
 
-    if (!process.env.OPENAI_API_KEY) {
-      return jsonError("Missing OPENAI_API_KEY", 500);
-    }
+    const prediction = await replicate.predictions.get(id);
 
-    const job = await client.videos.retrieve(id);
-
-    if (job.status === "failed") {
+    if (prediction.status === "failed") {
       return Response.json(
-        {
-          status: "failed",
-          progress: job.progress ?? 0,
-          error: job.error?.message ?? "Video generation failed",
-        },
+        { status: "failed", progress: 0, error: prediction.error ?? "Video generation failed" },
         { status: 500 }
       );
     }
 
-    if (job.status !== "completed") {
+    if (prediction.status !== "succeeded") {
       return Response.json({
-        status: job.status,
-        progress: job.progress ?? 0,
+        status: prediction.status === "processing" ? "in_progress" : "queued",
+        progress: 0,
       });
     }
+
+    const videoUrl = Array.isArray(prediction.output)
+      ? prediction.output[0]
+      : prediction.output;
+
+    if (!videoUrl) return jsonError("No video URL in response", 500);
 
     const storagePath = `videos/${id}.mp4`;
 
-    const { data: existingRow, error: existingError } = await supabaseAdmin
+    const { data: existingRow } = await supabaseAdmin
       .from("media")
-      .select("id, url, storage_path")
-      .eq("type", "video")
+      .select("id, url")
       .eq("storage_path", storagePath)
       .maybeSingle();
 
-    if (existingError) {
-      return jsonError(
-        "Failed to check existing video",
-        500,
-        existingError.message
-      );
-    }
-
     if (existingRow?.url) {
-      return Response.json({
-        status: "completed",
-        progress: 100,
-        downloadUrl: existingRow.url,
-      });
+      return Response.json({ status: "completed", progress: 100, downloadUrl: existingRow.url });
     }
 
-    const contentRes = await fetch(
-      `https://api.openai.com/v1/videos/${id}/content`,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        },
-        cache: "no-store",
-      }
-    );
+    const videoRes = await fetch(videoUrl);
+    if (!videoRes.ok) return jsonError("Failed to download video", 500);
 
-    if (!contentRes.ok) {
-      const text = await contentRes.text().catch(() => "");
-      return jsonError("Failed to download video content", 500, text);
-    }
-
-    const arrayBuffer = await contentRes.arrayBuffer();
-    const bytes = toBytes(arrayBuffer);
+    const arrayBuffer = await videoRes.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
 
     const { error: uploadError } = await supabaseAdmin.storage
       .from("media")
-      .upload(storagePath, bytes, {
-        contentType: "video/mp4",
-        upsert: true,
-      });
+      .upload(storagePath, bytes, { contentType: "video/mp4", upsert: true });
 
-    if (uploadError) {
-      return jsonError("Supabase upload failed", 500, uploadError.message);
-    }
+    if (uploadError) return jsonError("Supabase upload failed", 500, uploadError.message);
 
-    const {
-      data: { publicUrl },
-    } = supabaseAdmin.storage.from("media").getPublicUrl(storagePath);
+    const { data: { publicUrl } } = supabaseAdmin.storage.from("media").getPublicUrl(storagePath);
 
-    if (!publicUrl) {
-      return jsonError("Failed to get public URL", 500);
-    }
+    await supabaseAdmin.from("media").upsert(
+      { type: "video", prompt: prediction.input?.prompt ?? "", url: publicUrl, storage_path: storagePath },
+      { onConflict: "storage_path" }
+    );
 
-    const { error: upsertError } = await supabaseAdmin
-      .from("media")
-      .upsert(
-        {
-          type: "video",
-          prompt: job.prompt ?? "",
-          url: publicUrl,
-          storage_path: storagePath,
-        },
-        {
-          onConflict: "storage_path",
-        }
-      );
-
-    if (upsertError) {
-      return jsonError("DB upsert failed", 500, upsertError.message);
-    }
-
-    return Response.json({
-      status: "completed",
-      progress: 100,
-      downloadUrl: publicUrl,
-    });
+    return Response.json({ status: "completed", progress: 100, downloadUrl: publicUrl });
   } catch (error: any) {
     console.error("VIDEO GET ERROR:", error);
-    return jsonError(
-      "Status check failed",
-      500,
-      error?.message ?? String(error)
-    );
+    return jsonError("Status check failed", 500, error?.message ?? String(error));
   }
 }

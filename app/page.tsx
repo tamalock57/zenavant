@@ -36,8 +36,9 @@ export default function HomePage() {
 
     try {
       if (!email.trim() || !password.trim()) {
-        setMessage("Please enter your email and password.");
-        return;
+         setMessage("Please enter your email and password.");
+         setLoading(false); // ← add this
+      return;
       }
 
       if (mode === "signin") {

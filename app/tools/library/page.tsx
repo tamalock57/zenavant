@@ -21,6 +21,8 @@ type Item = RawItem & {
   normalizedType: "prompt" | "plan" | "video" | "image" | "unknown";
 };
 
+type FilterType = "all" | "video" | "image" | "prompt" | "plan";
+
 function getPublicUrl(path?: string | null) {
   if (!path) return null;
   const { data } = supabase.storage.from("media").getPublicUrl(path);
@@ -41,14 +43,8 @@ function normalizeType(item: RawItem, mediaUrl: string | null): Item["normalized
   if (type === "prompt") return "prompt";
   if (type === "plan") return "plan";
 
-  if (url.endsWith(".mp4") || url.endsWith(".webm") || url.endsWith(".mov")) {
-    return "video";
-  }
-
-  if (url.endsWith(".png") || url.endsWith(".jpg") || url.endsWith(".jpeg") || url.endsWith(".webp")) {
-    return "image";
-  }
-
+  if (url.endsWith(".mp4") || url.endsWith(".webm") || url.endsWith(".mov")) return "video";
+  if (url.endsWith(".png") || url.endsWith(".jpg") || url.endsWith(".jpeg") || url.endsWith(".webp")) return "image";
   if (item.prompt && !mediaUrl) return "prompt";
 
   return "unknown";
@@ -59,42 +55,27 @@ export default function LibraryPage() {
 
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [isAuthed, setIsAuthed] = useState(false);
-
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [filter, setFilter] = useState<FilterType>("all");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // ✅ AUTH LOCK
   useEffect(() => {
     async function checkSession() {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session) {
-        router.replace("/");
-        return;
-      }
-
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { router.replace("/"); return; }
       setIsAuthed(true);
       setCheckingAuth(false);
     }
-
     checkSession();
   }, [router]);
 
-  // ✅ FETCH LIBRARY
   async function fetchLibrary() {
     try {
       setLoading(true);
-
       const res = await fetch("/api/library");
       const data = await res.json();
-
-      if (!res.ok) {
-        alert(data.error || "Failed to load");
-        return;
-      }
+      if (!res.ok) { alert(data.error || "Failed to load"); return; }
 
       const mapped: Item[] = (data.items || []).map((item: RawItem) => {
         const mediaUrl = item.url || getPublicUrl(item.storage_path);
@@ -115,22 +96,38 @@ export default function LibraryPage() {
   }
 
   useEffect(() => {
-    if (!checkingAuth && isAuthed) {
-      fetchLibrary();
-    }
+    if (!checkingAuth && isAuthed) fetchLibrary();
   }, [checkingAuth, isAuthed]);
 
-  function toggleSelect(id: string) {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
+  async function handleDelete(item: Item) {
+    if (!confirm("Delete this item?")) return;
+
+    setDeletingId(item.id);
+    try {
+      const isplan = item.normalizedType === "plan";
+      const endpoint = isplan ? "/api/library/delete-plan" : "/api/library/delete";
+
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: item.id, storage_path: item.storage_path }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || "Delete failed"); return; }
+
+      setItems((prev) => prev.filter((i) => i.id !== item.id));
+    } catch (err) {
+      console.error(err);
+      alert("Delete failed");
+    } finally {
+      setDeletingId(null);
+    }
   }
 
-  // ✅ USE PROMPT
   function usePromptForImage(item: Item) {
     const text = item.prompt || item.title;
     if (!text) return alert("No prompt found");
-
     localStorage.setItem("zenavant_prompt", text);
     router.push("/tools/image-maker");
   }
@@ -138,152 +135,153 @@ export default function LibraryPage() {
   function usePromptForVideo(item: Item) {
     const text = item.prompt || item.title;
     if (!text) return alert("No prompt found");
-
     localStorage.setItem("zenavant_prompt", text);
     router.push("/tools/video-maker");
   }
 
-  // ✅ DOWNLOAD
   function handleDownload(item: Item) {
-    if (!item.mediaUrl) {
-      alert("No file available");
-      return;
-    }
-
+    if (!item.mediaUrl) { alert("No file available"); return; }
     const link = document.createElement("a");
     link.href = item.mediaUrl;
-    link.download = item.title || item.prompt || item.id;
+    link.download = item.title || item.id;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   }
 
-  const hasItems = useMemo(() => items.length > 0, [items]);
+  const filteredItems = useMemo(() => {
+    if (filter === "all") return items;
+    return items.filter((i) => i.normalizedType === filter);
+  }, [items, filter]);
 
-  // ✅ LOADING FIXED
+  const counts = useMemo(() => ({
+    all: items.length,
+    video: items.filter((i) => i.normalizedType === "video").length,
+    image: items.filter((i) => i.normalizedType === "image").length,
+    prompt: items.filter((i) => i.normalizedType === "prompt").length,
+    plan: items.filter((i) => i.normalizedType === "plan").length,
+  }), [items]);
+
   if (checkingAuth) {
-    return (
-      <div className="max-w-6xl mx-auto p-4 text-black">
-        Loading...
-      </div>
-    );
+    return <div className="max-w-6xl mx-auto p-4 text-black">Loading...</div>;
   }
 
   if (!isAuthed) return null;
 
   return (
     <div className="max-w-6xl mx-auto p-4 space-y-4 text-black">
-      {/* HEADER */}
+
+      {/* Header */}
       <div className="flex justify-between items-center">
         <h1 className="text-xl font-semibold">Library</h1>
-
         <button
           onClick={fetchLibrary}
-          className="px-3 py-2 rounded-xl bg-black text-white"
+          className="px-3 py-2 rounded-xl bg-black text-white text-sm"
         >
           Refresh
         </button>
       </div>
 
-      {/* STATES */}
+      {/* Filter Tabs */}
+      <div className="flex flex-wrap gap-2">
+        {(["all", "video", "image", "prompt", "plan"] as FilterType[]).map((f) => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            className={`px-3 py-1.5 rounded-xl text-sm font-medium transition ${
+              filter === f
+                ? "bg-black text-white"
+                : "bg-neutral-100 text-black hover:bg-neutral-200"
+            }`}
+          >
+            {f.charAt(0).toUpperCase() + f.slice(1)} ({counts[f]})
+          </button>
+        ))}
+      </div>
+
+      {/* States */}
       {loading && (
+        <div className="py-10 text-center text-neutral-500">Loading...</div>
+      )}
+
+      {!loading && filteredItems.length === 0 && (
         <div className="py-10 text-center text-neutral-500">
-          Loading...
+          No {filter === "all" ? "items" : filter + "s"} yet.
         </div>
       )}
 
-      {!loading && !hasItems && (
-        <div className="py-10 text-center text-neutral-500">
-          No items yet.
-        </div>
-      )}
-
-      {/* GRID */}
+      {/* Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-        {items.map((item) => {
-          const selected = selectedIds.includes(item.id);
+        {filteredItems.map((item) => (
+          <div
+            key={item.id}
+            className="rounded-xl overflow-hidden shadow border bg-white"
+          >
+            {/* Top */}
+            <div className="flex justify-between items-center p-3 border-b">
+              <span className="text-xs bg-neutral-100 px-2 py-1 rounded">
+                {item.normalizedType}
+              </span>
+              <span className="text-xs text-neutral-400">
+                {formatDate(item.created_at)}
+              </span>
+            </div>
 
-          return (
-            <div
-              key={item.id}
-              className={`rounded-xl overflow-hidden shadow border bg-white ${
-                selected ? "ring-2 ring-black" : ""
-              }`}
-            >
-              {/* TOP */}
-              <div className="flex justify-between p-3 border-b">
-                <input
-                  type="checkbox"
-                  checked={selected}
-                  onChange={() => toggleSelect(item.id)}
-                />
-
-                <span className="text-xs bg-neutral-100 px-2 py-1 rounded">
-                  {item.normalizedType}
-                </span>
-              </div>
-
-              {/* CONTENT */}
-              <div className="aspect-video bg-neutral-50">
-                {item.normalizedType === "video" && item.mediaUrl && (
-                  <video src={item.mediaUrl} controls className="w-full h-full object-cover" />
-                )}
-
-                {item.normalizedType === "image" && item.mediaUrl && (
-                  <img src={item.mediaUrl} className="w-full h-full object-cover" />
-                )}
-
-                {item.normalizedType === "prompt" && (
-                  <div className="p-3 text-sm overflow-auto h-full">
-                    {item.prompt}
-                  </div>
-                )}
-
-                {item.normalizedType === "plan" && (
-                  <div className="p-3 text-sm overflow-auto h-full">
-                    {item.prompt}
-                  </div>
-                )}
-              </div>
-
-              {/* FOOTER */}
-              <div className="p-3 border-t space-y-2">
-                <div className="text-xs text-neutral-500">
-                  {formatDate(item.created_at)}
+            {/* Content */}
+            <div className="aspect-video bg-neutral-50">
+              {item.normalizedType === "video" && item.mediaUrl && (
+                <video src={item.mediaUrl} controls className="w-full h-full object-cover" />
+              )}
+              {item.normalizedType === "image" && item.mediaUrl && (
+                <img src={item.mediaUrl} alt="" className="w-full h-full object-cover" />
+              )}
+              {(item.normalizedType === "prompt" || item.normalizedType === "plan") && (
+                <div className="p-3 text-sm overflow-auto h-full text-neutral-700">
+                  {item.prompt || item.title}
                 </div>
+              )}
+            </div>
 
-                <div className="flex gap-2 flex-wrap">
-                  {(item.prompt || item.normalizedType === "prompt") && (
-                    <>
-                      <button
-                        onClick={() => usePromptForImage(item)}
-                        className="px-2 py-1 text-xs bg-black text-white rounded"
-                      >
-                        Use → Image
-                      </button>
-
-                      <button
-                        onClick={() => usePromptForVideo(item)}
-                        className="px-2 py-1 text-xs border rounded"
-                      >
-                        Use → Video
-                      </button>
-                    </>
-                  )}
-
-                  {item.mediaUrl && (
+            {/* Footer */}
+            <div className="p-3 border-t space-y-2">
+              <div className="flex gap-2 flex-wrap">
+                {(item.prompt || item.normalizedType === "prompt") && (
+                  <>
                     <button
-                      onClick={() => handleDownload(item)}
-                      className="px-2 py-1 text-xs bg-neutral-800 text-white rounded"
+                      onClick={() => usePromptForImage(item)}
+                      className="px-2 py-1 text-xs bg-black text-white rounded"
                     >
-                      Download
+                      Use → Image
                     </button>
-                  )}
-                </div>
+                    <button
+                      onClick={() => usePromptForVideo(item)}
+                      className="px-2 py-1 text-xs border rounded"
+                    >
+                      Use → Video
+                    </button>
+                  </>
+                )}
+
+                {item.mediaUrl && (
+                  <button
+                    onClick={() => handleDownload(item)}
+                    className="px-2 py-1 text-xs bg-neutral-800 text-white rounded"
+                  >
+                    Download
+                  </button>
+                )}
+
+                <button
+                  onClick={() => handleDelete(item)}
+                  disabled={deletingId === item.id}
+                  className="px-2 py-1 text-xs bg-red-500 text-white rounded disabled:opacity-50 ml-auto"
+                >
+                  {deletingId === item.id ? "Deleting..." : "Delete"}
+                </button>
               </div>
             </div>
-          );
-        })}
+          </div>
+        ))}
       </div>
     </div>
   );
