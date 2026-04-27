@@ -131,7 +131,7 @@ async function generateWithReplicate(
     }
 
     if (result.status === "failed") {
-      throw new Error(result.error ?? "Replicate generation failed");
+      throw new Error(String(result.error ?? "Replicate generation failed"));
     }
 
     const imageUrl = Array.isArray(result.output)
