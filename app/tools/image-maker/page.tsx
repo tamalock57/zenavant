@@ -350,7 +350,7 @@ export default function ImageMakerPage() {
                   href={url}
                   download
                   className="mt-2 inline-block text-sm text-black underline"
-                >
+                <a>
                   Download image
                 </a>
               </div>
