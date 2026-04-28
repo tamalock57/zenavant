@@ -18,14 +18,14 @@ export default function LoginPage() {
 
   async function handleSignIn() {
   setLoading(true); setError(null);
-  const { error, data } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) {
-    alert("Error: " + error.message);
     setError(error.message);
-  } else {
-    alert("Success! " + JSON.stringify(data.user?.email));
-    window.location.href = "/dashboard";
+    setLoading(false);
+  } else if (data.session) {
+    window.location.replace("/dashboard");
   }
+  
   setLoading(false);
   }
 

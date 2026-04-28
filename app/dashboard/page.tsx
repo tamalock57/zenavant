@@ -21,22 +21,19 @@ export default function DashboardPage() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [checked, setChecked] = useState(false);
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) {
-        // Wait briefly for session to hydrate before redirecting
-        setTimeout(() => {
-          supabase.auth.getSession().then(({ data: { session: s2 } }) => {
-            if (!s2) router.replace("/");
-            else { setUserEmail(s2.user?.email ?? null); setChecked(true); }
-          });
-        }, 500);
-      } else {
+ useEffect(() => {
+  const { data: { subscription } } = supabase.auth.onAuthStateChange(
+    (event, session) => {
+      if (event === "SIGNED_OUT" || (!session && event !== "INITIAL_SESSION")) {
+        router.replace("/");
+      } else if (session) {
         setUserEmail(session.user?.email ?? null);
         setChecked(true);
       }
-    });
-  }, [router]);
+    }
+  );
+  return () => subscription.unsubscribe();
+}, [router]);
 
   if (!checked) {
     return (
