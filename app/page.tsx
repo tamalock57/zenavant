@@ -10,6 +10,8 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -34,6 +36,21 @@ export default function LoginPage() {
   async function handleGoogle() {
     await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: `${location.origin}/dashboard` } });
   }
+
+  const EyeOpen = () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+      <circle cx="12" cy="12" r="3"/>
+    </svg>
+  );
+
+  const EyeClosed = () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+      <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+      <line x1="1" y1="1" x2="23" y2="23"/>
+    </svg>
+  );
 
   return (
     <>
@@ -81,7 +98,6 @@ export default function LoginPage() {
 
         .zv-logo { font-family:'Cormorant Garamond',serif;font-size:28px;font-weight:600;color:#2C1F14;letter-spacing:0.02em; }
         .zv-logo span { color:#C4714A; }
-
         .zv-hero { flex:1;display:flex;flex-direction:column;justify-content:center;padding:40px 0; }
         .zv-eyebrow { font-size:11px;font-weight:500;letter-spacing:0.18em;text-transform:uppercase;color:#C4714A;margin-bottom:20px; }
         .zv-headline { font-family:'Cormorant Garamond',serif;font-size:clamp(42px,5vw,68px);font-weight:300;line-height:1.1;color:#2C1F14; }
@@ -114,14 +130,21 @@ export default function LoginPage() {
         .zv-field-row { display:flex;justify-content:space-between;align-items:center;margin-bottom:8px; }
         .zv-field-row .zv-label { margin-bottom:0; }
 
+        .zv-input-wrap { position:relative; }
         .zv-input {
-          width:100%;padding:14px 16px;background:rgba(255,255,255,0.8);
+          width:100%;padding:14px 48px 14px 16px;background:rgba(255,255,255,0.8);
           border:1.5px solid #E8DFD0;border-radius:12px;
           font-family:'DM Sans',sans-serif;font-size:15px;color:#2C1F14;
           outline:none;transition:border-color 0.2s,box-shadow 0.2s;
         }
         .zv-input:focus { border-color:#C4714A;box-shadow:0 0 0 3px rgba(196,113,74,0.12); }
         .zv-input::placeholder { color:#9A7E68;font-weight:300; }
+        .zv-eye {
+          position:absolute;right:14px;top:50%;transform:translateY(-50%);
+          background:none;border:none;cursor:pointer;color:#9A7E68;padding:4px;
+          display:flex;align-items:center;justify-content:center;
+        }
+        .zv-eye:hover { color:#C4714A; }
 
         .zv-forgot { font-size:12px;color:#C4714A;text-decoration:none; }
 
@@ -201,23 +224,38 @@ export default function LoginPage() {
               {error && <div className="zv-error">{error}</div>}
               {message && <div className="zv-success">{message}</div>}
 
+              {/* Email */}
               <div className="zv-field">
                 <label className="zv-label">Email</label>
-                <input className="zv-input" type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+                <div className="zv-input-wrap">
+                  <input className="zv-input" type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+                </div>
               </div>
 
+              {/* Password */}
               <div className="zv-field">
                 <div className="zv-field-row">
                   <label className="zv-label">Password</label>
                   {tab === "signin" && <a href="/forgot-password" className="zv-forgot">Forgot password?</a>}
                 </div>
-                <input className="zv-input" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} />
+                <div className="zv-input-wrap">
+                  <input className="zv-input" type={showPassword ? "text" : "password"} placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} />
+                  <button type="button" className="zv-eye" onClick={() => setShowPassword(!showPassword)}>
+                    {showPassword ? <EyeClosed /> : <EyeOpen />}
+                  </button>
+                </div>
               </div>
 
+              {/* Confirm Password (signup only) */}
               {tab === "signup" && (
                 <div className="zv-field">
                   <label className="zv-label">Confirm Password</label>
-                  <input className="zv-input" type="password" placeholder="Repeat your password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+                  <div className="zv-input-wrap">
+                    <input className="zv-input" type={showConfirm ? "text" : "password"} placeholder="Repeat your password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+                    <button type="button" className="zv-eye" onClick={() => setShowConfirm(!showConfirm)}>
+                      {showConfirm ? <EyeClosed /> : <EyeOpen />}
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -228,7 +266,12 @@ export default function LoginPage() {
               <div className="zv-divider">or continue with</div>
 
               <button className="zv-social" onClick={handleGoogle}>
-                <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.36-8.16 2.36-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+                <svg width="18" height="18" viewBox="0 0 48 48">
+                  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+                  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+                  <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+                  <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.36-8.16 2.36-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+                </svg>
                 Google
               </button>
 
