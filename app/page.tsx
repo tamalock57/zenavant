@@ -24,7 +24,7 @@ export default function LoginPage() {
     setError(error.message);
   } else {
     alert("Success! " + JSON.stringify(data.user?.email));
-    router.push("/dashboard");
+    window.location.href = "/dashboard";
   }
   setLoading(false);
   }
