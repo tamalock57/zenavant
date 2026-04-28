@@ -1,21 +1,24 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Cormorant_Garamond, DM_Sans } from "next/font/google";
 import "./globals.css";
 import Navbar from "@/app/components/Navbar";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const cormorant = Cormorant_Garamond({
+  variable: "--font-cormorant",
   subsets: ["latin"],
+  weight: ["300", "400", "600"],
+  style: ["normal", "italic"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const dmSans = DM_Sans({
+  variable: "--font-dm-sans",
   subsets: ["latin"],
+  weight: ["300", "400", "500"],
 });
 
 export const metadata: Metadata = {
   title: "Zenavant",
-  description: "Turn ideas into something real.",
+  description: "Turn ideas into something new.",
 };
 
 export default function RootLayout({
@@ -26,7 +29,8 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-50`}
+        className={`${cormorant.variable} ${dmSans.variable} antialiased`}
+        style={{ background: "#FAF7F2", color: "#3A2A1E", fontFamily: "var(--font-dm-sans), sans-serif" }}
       >
         <Navbar />
         <main className="max-w-5xl mx-auto px-4 py-6">
