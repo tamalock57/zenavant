@@ -104,7 +104,7 @@ export default function LoginPage() {
         .zv-headline em { font-style:italic;color:#C4714A; }
         .zv-subline { margin-top:24px;font-size:16px;font-weight:300;color:#6B4F38;line-height:1.7;max-width:380px; }
         .zv-features { display:flex;flex-direction:column;gap:10px;margin-top:40px; }
-        .zv-feature { display:flex;align-items:center;gap:12px;font-size:14px;color:#6B4F38; }
+        .zv-feature { display:flex;align-items:center;gap:12px;font-size:14px;color:#6B4F38;list-style:none; }
         .zv-dot { width:6px;height:6px;border-radius:50%;background:#C4714A;flex-shrink:0; }
         .zv-quote { font-family:'Cormorant Garamond',serif;font-style:italic;font-size:14px;color:#9A7E68; }
 
@@ -130,7 +130,7 @@ export default function LoginPage() {
         .zv-field-row { display:flex;justify-content:space-between;align-items:center;margin-bottom:8px; }
         .zv-field-row .zv-label { margin-bottom:0; }
 
-        .zv-input-wrap { position:relative; }
+        .zv-input-wrap { position:relative;width:100%; }
         .zv-input {
           width:100%;padding:14px 48px 14px 16px;background:rgba(255,255,255,0.8);
           border:1.5px solid #E8DFD0;border-radius:12px;
