@@ -57,12 +57,14 @@ export default function LoginPage() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:wght@300;400;500&display=swap');
 
+        *, *::before, *::after { box-sizing: border-box; }
+
         .zv-root {
           min-height: 100vh;
           background: #FAF7F2;
           font-family: 'DM Sans', sans-serif;
           color: #3A2A1E;
-          overflow: hidden;
+          overflow-x: hidden;
           position: relative;
         }
         .zv-orb {
@@ -72,6 +74,7 @@ export default function LoginPage() {
           opacity: 0.35;
           animation: zvDrift 12s ease-in-out infinite alternate;
           pointer-events: none;
+          z-index: 0;
         }
         .zv-orb-1 { width:500px;height:500px;background:radial-gradient(circle,#D4855E,#C4714A);top:-120px;left:-100px; }
         .zv-orb-2 { width:400px;height:400px;background:radial-gradient(circle,#E8C99A,#D4A96A);top:40%;right:-80px;animation-delay:-4s; }
@@ -103,19 +106,26 @@ export default function LoginPage() {
         .zv-headline { font-family:'Cormorant Garamond',serif;font-size:clamp(42px,5vw,68px);font-weight:300;line-height:1.1;color:#2C1F14; }
         .zv-headline em { font-style:italic;color:#C4714A; }
         .zv-subline { margin-top:24px;font-size:16px;font-weight:300;color:#6B4F38;line-height:1.7;max-width:380px; }
-        .zv-features { display:flex;flex-direction:column;gap:10px;margin-top:40px; }
+        .zv-features { display:flex;flex-direction:column;gap:10px;margin-top:40px;padding:0;list-style:none; }
         .zv-feature { display:flex;align-items:center;gap:12px;font-size:14px;color:#6B4F38;list-style:none; }
         .zv-dot { width:6px;height:6px;border-radius:50%;background:#C4714A;flex-shrink:0; }
         .zv-quote { font-family:'Cormorant Garamond',serif;font-style:italic;font-size:14px;color:#9A7E68; }
 
-        .zv-right { display:flex;align-items:center;justify-content:center;padding:52px 56px;animation:zvFadeUp 0.9s ease 0.15s both; }
+        .zv-right {
+          display:flex;align-items:center;justify-content:center;
+          padding:52px 56px;
+          animation:zvFadeUp 0.9s ease 0.15s both;
+        }
 
         .zv-card {
           width:100%;max-width:420px;
-          background:rgba(253,249,244,0.75);backdrop-filter:blur(24px);
-          border:1px solid rgba(196,113,74,0.15);border-radius:24px;
+          background:rgba(253,249,244,0.75);
+          backdrop-filter:blur(24px);
+          border:1px solid rgba(196,113,74,0.15);
+          border-radius:24px;
           padding:48px 44px;
           box-shadow:0 8px 60px rgba(44,31,20,0.1),0 1px 0 rgba(255,255,255,0.8) inset;
+          box-sizing:border-box;
         }
 
         .zv-card-title { font-family:'Cormorant Garamond',serif;font-size:30px;font-weight:400;color:#2C1F14;margin-bottom:6px; }
@@ -126,19 +136,28 @@ export default function LoginPage() {
         .zv-tab.active { background:white;color:#2C1F14;box-shadow:0 2px 8px rgba(44,31,20,0.12); }
 
         .zv-label { display:block;font-size:12px;font-weight:500;letter-spacing:0.06em;text-transform:uppercase;color:#6B4F38;margin-bottom:8px; }
-        .zv-field { margin-bottom:18px; }
+        .zv-field { margin-bottom:18px;width:100%; }
         .zv-field-row { display:flex;justify-content:space-between;align-items:center;margin-bottom:8px; }
         .zv-field-row .zv-label { margin-bottom:0; }
 
-        .zv-input-wrap { position:relative;width:100%; }
+        .zv-input-wrap { position:relative;width:100%;display:block; }
         .zv-input {
-          width:100%;padding:14px 48px 14px 16px;background:rgba(255,255,255,0.8);
-          border:1.5px solid #E8DFD0;border-radius:12px;
-          font-family:'DM Sans',sans-serif;font-size:15px;color:#2C1F14;
-          outline:none;transition:border-color 0.2s,box-shadow 0.2s;
+          display:block;
+          width:100%;
+          padding:14px 48px 14px 16px;
+          background:rgba(255,255,255,0.8);
+          border:1.5px solid #E8DFD0;
+          border-radius:12px;
+          font-family:'DM Sans',sans-serif;
+          font-size:15px;
+          color:#2C1F14;
+          outline:none;
+          transition:border-color 0.2s,box-shadow 0.2s;
+          box-sizing:border-box;
         }
         .zv-input:focus { border-color:#C4714A;box-shadow:0 0 0 3px rgba(196,113,74,0.12); }
         .zv-input::placeholder { color:#9A7E68;font-weight:300; }
+
         .zv-eye {
           position:absolute;right:14px;top:50%;transform:translateY(-50%);
           background:none;border:none;cursor:pointer;color:#9A7E68;padding:4px;
@@ -149,13 +168,16 @@ export default function LoginPage() {
         .zv-forgot { font-size:12px;color:#C4714A;text-decoration:none; }
 
         .zv-btn {
-          width:100%;padding:16px;
+          display:block;
+          width:100%;
+          padding:16px;
           background:linear-gradient(135deg,#C4714A,#A85A36);
           color:white;border:none;border-radius:12px;
           font-family:'DM Sans',sans-serif;font-size:15px;font-weight:500;letter-spacing:0.03em;
           cursor:pointer;margin-top:8px;
           transition:transform 0.15s,box-shadow 0.15s;
           box-shadow:0 4px 20px rgba(196,113,74,0.35);
+          box-sizing:border-box;
         }
         .zv-btn:hover { transform:translateY(-1px);box-shadow:0 6px 28px rgba(196,113,74,0.45); }
         .zv-btn:disabled { opacity:0.6;cursor:not-allowed;transform:none; }
@@ -164,9 +186,12 @@ export default function LoginPage() {
         .zv-divider::before,.zv-divider::after { content:'';flex:1;height:1px;background:#E8DFD0; }
 
         .zv-social {
-          width:100%;padding:13px;background:white;border:1.5px solid #E8DFD0;border-radius:12px;
+          display:flex;
+          width:100%;
+          padding:13px;background:white;border:1.5px solid #E8DFD0;border-radius:12px;
           font-family:'DM Sans',sans-serif;font-size:14px;color:#3A2A1E;cursor:pointer;
-          transition:border-color 0.2s,box-shadow 0.2s;display:flex;align-items:center;justify-content:center;gap:10px;
+          transition:border-color 0.2s,box-shadow 0.2s;align-items:center;justify-content:center;gap:10px;
+          box-sizing:border-box;
         }
         .zv-social:hover { border-color:#C4714A;box-shadow:0 2px 12px rgba(196,113,74,0.1); }
 
@@ -179,7 +204,8 @@ export default function LoginPage() {
         @media (max-width: 768px) {
           .zv-page { grid-template-columns:1fr; }
           .zv-left { display:none; }
-          .zv-right { padding:32px 24px; }
+          .zv-right { padding:24px 20px; }
+          .zv-card { padding:36px 28px; }
         }
       `}</style>
 
@@ -224,7 +250,6 @@ export default function LoginPage() {
               {error && <div className="zv-error">{error}</div>}
               {message && <div className="zv-success">{message}</div>}
 
-              {/* Email */}
               <div className="zv-field">
                 <label className="zv-label">Email</label>
                 <div className="zv-input-wrap">
@@ -232,7 +257,6 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              {/* Password */}
               <div className="zv-field">
                 <div className="zv-field-row">
                   <label className="zv-label">Password</label>
@@ -246,7 +270,6 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              {/* Confirm Password (signup only) */}
               {tab === "signup" && (
                 <div className="zv-field">
                   <label className="zv-label">Confirm Password</label>
