@@ -17,11 +17,12 @@ export default function LoginPage() {
   const [message, setMessage] = useState<string | null>(null);
 
   async function handleSignIn() {
-    setLoading(true); setError(null);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) setError(error.message);
-    else router.push("/dashboard");
-    setLoading(false);
+  alert("signing in...");
+  setLoading(true); setError(null);
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) setError(error.message);
+  else router.push("/dashboard");
+  setLoading(false);
   }
 
   async function handleSignUp() {
