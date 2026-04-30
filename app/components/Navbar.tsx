@@ -25,9 +25,8 @@ export default function Navbar() {
   if (pathname === "/") return null;
 
   async function handleLogout() {
-    await supabase.auth.signOut();
-    router.replace("/");
-    router.refresh();
+  await supabase.auth.signOut();
+  window.location.href = "/";
   }
 
   return (
