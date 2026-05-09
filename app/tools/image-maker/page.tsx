@@ -28,7 +28,7 @@ const IMAGE_MODELS = [
 ];
 
 const OPENAI_SIZES = ["1024x1024", "1024x1536", "1536x1024"];
-const REPLICATE_SIZES = ["1024x1024", "1024x1536", "1536x1024", "512x512"];
+const REPLICATE_SIZES = ["1024x1024", "1024x1536", "1536x1024"];
 const SEEDREAM_SIZES = ["1024x1024", "1280x720", "720x1280"];
 
 export default function ImageMakerPage() {
