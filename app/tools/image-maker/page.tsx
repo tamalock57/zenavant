@@ -29,6 +29,7 @@ const IMAGE_MODELS = [
 
 const OPENAI_SIZES = ["1024x1024", "1024x1536", "1536x1024"];
 const REPLICATE_SIZES = ["1024x1024", "1024x1536", "1536x1024", "512x512"];
+const SEEDREAM_SIZES = ["1024x1024", "1280x720", "720x1280", "1920x1080", "1080x1920"];
 
 export default function ImageMakerPage() {
   const router = useRouter();
@@ -50,7 +51,8 @@ export default function ImageMakerPage() {
   const [error, setError] = useState<string | null>(null);
 
   const isOpenAI = modelId === "gpt-image-1";
-  const availableSizes = isOpenAI ? OPENAI_SIZES : REPLICATE_SIZES;
+  const isSeedream = modelId.includes("seedream");
+  const availableSizes = isOpenAI ? OPENAI_SIZES : isSeedream ? SEEDREAM_SIZES : REPLICATE_SIZES
 
   useEffect(() => {
     let mounted = true;
