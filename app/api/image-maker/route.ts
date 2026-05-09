@@ -109,8 +109,8 @@ async function generateWithReplicate(
   const MODEL_INPUTS: Record<string, object> = {
     "black-forest-labs/flux-pro": { prompt, width, height, steps: 25 },
     "black-forest-labs/flux-schnell": { prompt, width, height, num_inference_steps: 4 },
-    "bytedance/seedream-4.5": { prompt, width, height },
-    "bytedance/seedream-4": { prompt, width, height },
+    "bytedance/seedream-4.5": { prompt, aspect_ratio: width >= height ? "16:9" : "9:16" },
+    "bytedance/seedream-4": { prompt, width: Math.max(width, 1024), height: Math.max(height, 1024) },
     "tencent/hunyuan-image-2.1": { prompt, width, height },
     "prunaai/wan-2.2-image": { prompt, width, height },
   };

@@ -124,7 +124,7 @@ async function uploadImageToSupabase(file: File): Promise<string> {
     .jpeg({ quality: 90 })
     .toBuffer();
 
-  const path = `inputs/${Date.now()}-${file.name.replace(/\s+/g, "-")}`;
+  const path = `inputs/${Date.now()}.jpg`;
 
   const { error } = await supabaseAdmin.storage
     .from("media")
