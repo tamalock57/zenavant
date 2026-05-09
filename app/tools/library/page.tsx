@@ -39,16 +39,17 @@ function formatDate(value?: string | null) {
 function normalizeType(item: RawItem, mediaUrl: string | null): Item["normalizedType"] {
   const type = (item.type || "").toLowerCase();
   const url = (mediaUrl || "").toLowerCase();
-
   if (type === "prompt") return "prompt";
   if (type === "plan") return "plan";
-
   if (url.endsWith(".mp4") || url.endsWith(".webm") || url.endsWith(".mov")) return "video";
   if (url.endsWith(".png") || url.endsWith(".jpg") || url.endsWith(".jpeg") || url.endsWith(".webp")) return "image";
   if (item.prompt && !mediaUrl) return "prompt";
-
   return "unknown";
 }
+
+const TYPE_EMOJI: Record<string, string> = {
+  video: "🎬", image: "🎨", prompt: "💡", plan: "📋", unknown: "📄",
+};
 
 export default function LibraryPage() {
   const router = useRouter();
@@ -76,16 +77,10 @@ export default function LibraryPage() {
       const res = await fetch("/api/library");
       const data = await res.json();
       if (!res.ok) { alert(data.error || "Failed to load"); return; }
-
       const mapped: Item[] = (data.items || []).map((item: RawItem) => {
         const mediaUrl = item.url || getPublicUrl(item.storage_path);
-        return {
-          ...item,
-          mediaUrl,
-          normalizedType: normalizeType(item, mediaUrl),
-        };
+        return { ...item, mediaUrl, normalizedType: normalizeType(item, mediaUrl) };
       });
-
       setItems(mapped);
     } catch (err) {
       console.error(err);
@@ -101,21 +96,17 @@ export default function LibraryPage() {
 
   async function handleDelete(item: Item) {
     if (!confirm("Delete this item?")) return;
-
     setDeletingId(item.id);
     try {
       const isplan = item.normalizedType === "plan";
       const endpoint = isplan ? "/api/library/delete-plan" : "/api/library/delete";
-
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: item.id, storage_path: item.storage_path }),
       });
-
       const data = await res.json();
       if (!res.ok) { alert(data.error || "Delete failed"); return; }
-
       setItems((prev) => prev.filter((i) => i.id !== item.id));
     } catch (err) {
       console.error(err);
@@ -162,127 +153,136 @@ export default function LibraryPage() {
     plan: items.filter((i) => i.normalizedType === "plan").length,
   }), [items]);
 
-  if (checkingAuth) {
-    return <div className="max-w-6xl mx-auto p-4 text-black">Loading...</div>;
-  }
+  if (checkingAuth) return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#FAF7F2" }}>
+      <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "24px", color: "#C4714A" }}>Loading…</div>
+    </div>
+  );
 
   if (!isAuthed) return null;
 
   return (
-    <div className="max-w-6xl mx-auto p-4 space-y-4 text-black">
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:wght@300;400;500&display=swap');
+        .lib-wrap { max-width: 1100px; margin: 0 auto; padding: 40px 24px 80px; font-family: 'DM Sans', sans-serif; color: #3A2A1E; }
+        .lib-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; }
+        .lib-title { font-family: 'Cormorant Garamond', serif; font-size: clamp(28px, 4vw, 42px); font-weight: 300; color: #2C1F14; }
+        .lib-title em { font-style: italic; color: #C4714A; }
+        .lib-refresh { padding: 10px 20px; background: rgba(196,113,74,0.1); color: #A85A36; border: 1.5px solid rgba(196,113,74,0.2); border-radius: 10px; font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
+        .lib-refresh:hover { background: rgba(196,113,74,0.15); }
+        .lib-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 32px; }
+        .lib-filter { padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; transition: all 0.2s; font-family: 'DM Sans', sans-serif; }
+        .lib-filter-inactive { background: rgba(196,113,74,0.06); color: #6B4F38; }
+        .lib-filter-inactive:hover { background: rgba(196,113,74,0.12); }
+        .lib-filter-active { background: #C4714A; color: white; box-shadow: 0 2px 8px rgba(196,113,74,0.3); }
+        .lib-empty { text-align: center; padding: 60px 20px; color: #9A7E68; font-size: 16px; font-family: 'Cormorant Garamond', serif; font-style: italic; }
+        .lib-loading { text-align: center; padding: 60px 20px; color: #9A7E68; font-size: 16px; }
+        .lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+        .lib-card { background: rgba(253,249,244,0.9); border: 1px solid rgba(196,113,74,0.15); border-radius: 16px; overflow: hidden; box-shadow: 0 2px 16px rgba(44,31,20,0.06); transition: transform 0.2s, box-shadow 0.2s; }
+        .lib-card:hover { transform: translateY(-2px); box-shadow: 0 6px 24px rgba(196,113,74,0.12); }
+        .lib-card-top { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid rgba(196,113,74,0.08); }
+        .lib-type-badge { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: #C4714A; background: rgba(196,113,74,0.08); padding: 4px 10px; border-radius: 20px; }
+        .lib-date { font-size: 11px; color: #9A7E68; }
+        .lib-media { aspect-ratio: 16/9; background: rgba(232,223,208,0.3); overflow: hidden; }
+        .lib-media video { width: 100%; height: 100%; object-fit: cover; }
+        .lib-media img { width: 100%; height: 100%; object-fit: cover; }
+        .lib-text-preview { padding: 16px; font-size: 13px; color: #6B4F38; line-height: 1.6; height: 100%; overflow: auto; }
+        .lib-footer { padding: 12px 16px; border-top: 1px solid rgba(196,113,74,0.08); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+        .lib-action-btn { padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; transition: all 0.2s; font-family: 'DM Sans', sans-serif; }
+        .lib-btn-img { background: rgba(196,113,74,0.1); color: #A85A36; }
+        .lib-btn-img:hover { background: rgba(196,113,74,0.18); }
+        .lib-btn-vid { background: rgba(44,31,20,0.06); color: #3A2A1E; }
+        .lib-btn-vid:hover { background: rgba(44,31,20,0.12); }
+        .lib-btn-dl { background: rgba(196,113,74,0.1); color: #A85A36; }
+        .lib-btn-dl:hover { background: rgba(196,113,74,0.18); }
+        .lib-btn-del { background: rgba(220,50,50,0.08); color: #C0392B; margin-left: auto; }
+        .lib-btn-del:hover { background: rgba(220,50,50,0.15); }
+        .lib-btn-del:disabled { opacity: 0.4; cursor: not-allowed; }
+        @media (max-width: 640px) {
+          .lib-grid { grid-template-columns: 1fr; }
+          .lib-header { flex-direction: column; align-items: flex-start; gap: 12px; }
+        }
+      `}</style>
 
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <h1 className="text-xl font-semibold">Library</h1>
-        <button
-          onClick={fetchLibrary}
-          className="px-3 py-2 rounded-xl bg-black text-white text-sm"
-        >
-          Refresh
-        </button>
-      </div>
-
-      {/* Filter Tabs */}
-      <div className="flex flex-wrap gap-2">
-        {(["all", "video", "image", "prompt", "plan"] as FilterType[]).map((f) => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`px-3 py-1.5 rounded-xl text-sm font-medium transition ${
-              filter === f
-                ? "bg-black text-white"
-                : "bg-neutral-100 text-black hover:bg-neutral-200"
-            }`}
-          >
-            {f.charAt(0).toUpperCase() + f.slice(1)} ({counts[f]})
-          </button>
-        ))}
-      </div>
-
-      {/* States */}
-      {loading && (
-        <div className="py-10 text-center text-neutral-500">Loading...</div>
-      )}
-
-      {!loading && filteredItems.length === 0 && (
-        <div className="py-10 text-center text-neutral-500">
-          No {filter === "all" ? "items" : filter + "s"} yet.
+      <div className="lib-wrap">
+        <div className="lib-header">
+          <h1 className="lib-title">Your <em>Library</em></h1>
+          <button className="lib-refresh" onClick={fetchLibrary}>Refresh</button>
         </div>
-      )}
 
-      {/* Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-        {filteredItems.map((item) => (
-          <div
-            key={item.id}
-            className="rounded-xl overflow-hidden shadow border bg-white"
-          >
-            {/* Top */}
-            <div className="flex justify-between items-center p-3 border-b">
-              <span className="text-xs bg-neutral-100 px-2 py-1 rounded">
-                {item.normalizedType}
-              </span>
-              <span className="text-xs text-neutral-400">
-                {formatDate(item.created_at)}
-              </span>
-            </div>
+        <div className="lib-filters">
+          {(["all", "video", "image", "prompt", "plan"] as FilterType[]).map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`lib-filter ${filter === f ? "lib-filter-active" : "lib-filter-inactive"}`}
+            >
+              {TYPE_EMOJI[f] || ""} {f.charAt(0).toUpperCase() + f.slice(1)} ({counts[f]})
+            </button>
+          ))}
+        </div>
 
-            {/* Content */}
-            <div className="aspect-video bg-neutral-50">
-              {item.normalizedType === "video" && item.mediaUrl && (
-                <video src={item.mediaUrl} controls className="w-full h-full object-cover" />
-              )}
-              {item.normalizedType === "image" && item.mediaUrl && (
-                <img src={item.mediaUrl} alt="" className="w-full h-full object-cover" />
-              )}
-              {(item.normalizedType === "prompt" || item.normalizedType === "plan") && (
-                <div className="p-3 text-sm overflow-auto h-full text-neutral-700">
-                  {item.prompt || item.title}
-                </div>
-              )}
-            </div>
+        {loading && <div className="lib-loading">Loading your library…</div>}
 
-            {/* Footer */}
-            <div className="p-3 border-t space-y-2">
-              <div className="flex gap-2 flex-wrap">
-                {(item.prompt || item.normalizedType === "prompt") && (
-                  <>
-                    <button
-                      onClick={() => usePromptForImage(item)}
-                      className="px-2 py-1 text-xs bg-black text-white rounded"
-                    >
-                      Use → Image
-                    </button>
-                    <button
-                      onClick={() => usePromptForVideo(item)}
-                      className="px-2 py-1 text-xs border rounded"
-                    >
-                      Use → Video
-                    </button>
-                  </>
-                )}
-
-                {item.mediaUrl && (
-                  <button
-                    onClick={() => handleDownload(item)}
-                    className="px-2 py-1 text-xs bg-neutral-800 text-white rounded"
-                  >
-                    Download
-                  </button>
-                )}
-
-                <button
-                  onClick={() => handleDelete(item)}
-                  disabled={deletingId === item.id}
-                  className="px-2 py-1 text-xs bg-red-500 text-white rounded disabled:opacity-50 ml-auto"
-                >
-                  {deletingId === item.id ? "Deleting..." : "Delete"}
-                </button>
-              </div>
-            </div>
+        {!loading && filteredItems.length === 0 && (
+          <div className="lib-empty">
+            No {filter === "all" ? "items" : filter + "s"} yet. Start creating!
           </div>
-        ))}
+        )}
+
+        {!loading && filteredItems.length > 0 && (
+          <div className="lib-grid">
+            {filteredItems.map((item) => (
+              <div key={item.id} className="lib-card">
+                <div className="lib-card-top">
+                  <span className="lib-type-badge">
+                    {TYPE_EMOJI[item.normalizedType]} {item.normalizedType}
+                  </span>
+                  <span className="lib-date">{formatDate(item.created_at)}</span>
+                </div>
+
+                <div className="lib-media">
+                  {item.normalizedType === "video" && item.mediaUrl && (
+                    <video src={item.mediaUrl} controls />
+                  )}
+                  {item.normalizedType === "image" && item.mediaUrl && (
+                    <img src={item.mediaUrl} alt="" />
+                  )}
+                  {(item.normalizedType === "prompt" || item.normalizedType === "plan" || item.normalizedType === "unknown") && (
+                    <div className="lib-text-preview">{item.prompt || item.title || "No content"}</div>
+                  )}
+                </div>
+
+                <div className="lib-footer">
+                  {(item.prompt || item.normalizedType === "prompt") && (
+                    <>
+                      <button className="lib-action-btn lib-btn-img" onClick={() => usePromptForImage(item)}>
+                        → Image
+                      </button>
+                      <button className="lib-action-btn lib-btn-vid" onClick={() => usePromptForVideo(item)}>
+                        → Video
+                      </button>
+                    </>
+                  )}
+                  {item.mediaUrl && (
+                    <button className="lib-action-btn lib-btn-dl" onClick={() => handleDownload(item)}>
+                      Download
+                    </button>
+                  )}
+                  <button
+                    className="lib-action-btn lib-btn-del"
+                    onClick={() => handleDelete(item)}
+                    disabled={deletingId === item.id}
+                  >
+                    {deletingId === item.id ? "Deleting…" : "Delete"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
-    </div>
+    </>
   );
 }
