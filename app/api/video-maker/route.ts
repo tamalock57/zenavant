@@ -203,9 +203,12 @@ export async function GET(req: Request) {
     const arrayBuffer = await videoRes.arrayBuffer();
     const bytes = new Uint8Array(arrayBuffer);
 
+    // Preserve original content type from Replicate
+    const contentType = videoRes.headers.get("content-type") || "video/mp4";
+
     const { error: uploadError } = await supabaseAdmin.storage
-      .from("media")
-      .upload(storagePath, bytes, { contentType: "video/mp4", upsert: true });
+    .from("media")
+    .upload(storagePath, bytes, { contentType, upsert: true });
 
     if (uploadError) return jsonError("Supabase upload failed", 500, uploadError.message);
 
