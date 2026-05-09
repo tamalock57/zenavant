@@ -38,8 +38,8 @@ export default function ImageMakerPage() {
   const [styleHint, setStyleHint] = useState("");
   const [intensity, setIntensity] = useState<"subtle" | "balanced" | "dramatic">("balanced");
   const [prompt, setPrompt] = useState("");
-  const [modelId, setModelId] = useState("gpt-image-1");
-  const [size, setSize] = useState("1024x1024");
+  const [modelId, setModelId] = useState("black-forest-labs/flux-schnell");
+  const [size, setSize] = useState("512x512");
   const [numOutputs, setNumOutputs] = useState(1);
   const [referenceImages, setReferenceImages] = useState<File[]>([]);
   const [loadingPrompt, setLoadingPrompt] = useState(false);
