@@ -29,7 +29,7 @@ const IMAGE_MODELS = [
 
 const OPENAI_SIZES = ["1024x1024", "1024x1536", "1536x1024"];
 const REPLICATE_SIZES = ["1024x1024", "1024x1536", "1536x1024", "512x512"];
-const SEEDREAM_SIZES = ["1024x1024", "1280x720", "720x1280", "1920x1080", "1080x1920"];
+const SEEDREAM_SIZES = ["1024x1024", "1280x720", "720x1280"];
 
 export default function ImageMakerPage() {
   const router = useRouter();
@@ -72,8 +72,9 @@ export default function ImageMakerPage() {
   }, []);
 
   useEffect(() => {
-    if (!availableSizes.includes(size)) setSize("1024x1024");
-  }, [modelId]);
+  if (isSeedream) setSize("1024x1024");
+  else if (!availableSizes.includes(size)) setSize("1024x1024");
+}, [modelId]);
 
   async function handleGeneratePrompt() {
     if (idea.trim().length < 5) { alert("Please describe what you want to make first."); return; }
