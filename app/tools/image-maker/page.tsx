@@ -40,7 +40,7 @@ export default function ImageMakerPage() {
   const [intensity, setIntensity] = useState<"subtle" | "balanced" | "dramatic">("balanced");
   const [prompt, setPrompt] = useState("");
   const [modelId, setModelId] = useState("black-forest-labs/flux-schnell");
-  const [size, setSize] = useState("720x1280");
+  const [size, setSize] = useState("1024x1024");
   const [numOutputs, setNumOutputs] = useState(1);
   const [referenceImages, setReferenceImages] = useState<File[]>([]);
   const [loadingPrompt, setLoadingPrompt] = useState(false);
@@ -259,10 +259,13 @@ export default function ImageMakerPage() {
           {/* Model */}
           <div className="im-field">
             <label className="im-label">Model</label>
-            <select className="im-select" value={modelId} onChange={(e) => setModelId(e.target.value)}>
-              {IMAGE_MODELS.map((m) => (
-                <option key={m.value} value={m.value}>{m.label}</option>
-              ))}
+            <select className="im-select" value={modelId} onChange={(e) => {
+              const newModel = e.target.value;
+              setModelId(newModel);
+              if (newModel.includes("seedream")) setSize("1024x1024");
+              else if (newModel === "gpt-image-1") setSize("1024x1024");
+              else setSize("1024x1024");
+              }}>
             </select>
           </div>
 
